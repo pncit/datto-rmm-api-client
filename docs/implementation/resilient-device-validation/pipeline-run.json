@@ -576,6 +576,98 @@
       },
       "session_id": "a4486734-86b6-4b00-891c-8a99a8322dfa",
       "turn": "docs/implementation/resilient-device-validation/review-plan/plan-auditor-r2.md"
+    },
+    {
+      "t": 1783113013,
+      "kind": "worker",
+      "agent": "planner",
+      "label": "plan:p1 reviser r2",
+      "ok": true,
+      "started_at": "2026-07-03T21:09:08+00:00",
+      "duration_s": 64.7,
+      "api_duration_s": 59.6,
+      "turns": 12,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.4819,
+      "tokens": {
+        "input": 678,
+        "output": 3885,
+        "cache_read": 100176,
+        "cache_creation": 33125
+      },
+      "session_id": "fa68875d-2d24-490a-b1da-a804542f08ff",
+      "turn": "docs/implementation/resilient-device-validation/review-plan/reviser-r2.md"
+    },
+    {
+      "t": 1783113178,
+      "kind": "worker",
+      "agent": "plan-auditor",
+      "label": "plan:p1 plan-auditor r3",
+      "ok": true,
+      "started_at": "2026-07-03T21:10:13+00:00",
+      "duration_s": 165.1,
+      "api_duration_s": 153.9,
+      "turns": 15,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.898,
+      "tokens": {
+        "input": 684,
+        "output": 11499,
+        "cache_read": 243550,
+        "cache_creation": 48534
+      },
+      "session_id": "91d04af7-1bfe-405d-b28c-b56042edfbaa",
+      "turn": "docs/implementation/resilient-device-validation/review-plan/plan-auditor-r3.md"
+    },
+    {
+      "t": 1783113348,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "plan:p2 engineer r1",
+      "ok": true,
+      "started_at": "2026-07-03T21:12:58+00:00",
+      "duration_s": 170.2,
+      "api_duration_s": 158.6,
+      "turns": 19,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.8592,
+      "tokens": {
+        "input": 1158,
+        "output": 10696,
+        "cache_read": 231861,
+        "cache_creation": 47011
+      },
+      "session_id": "4642d618-1b4d-4067-9a58-7d9019e63476",
+      "turn": "docs/implementation/resilient-device-validation/review-plan/engineer-r1.md"
+    },
+    {
+      "t": 1783113419,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "plan:p2 architect r1",
+      "ok": true,
+      "started_at": "2026-07-03T21:12:58+00:00",
+      "duration_s": 241.0,
+      "api_duration_s": 222.4,
+      "turns": 13,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.0438,
+      "tokens": {
+        "input": 684,
+        "output": 14929,
+        "cache_read": 211729,
+        "cache_creation": 56133
+      },
+      "session_id": "b5bb78e4-7cc0-4cf7-ad2e-e483d8b563b6",
+      "turn": "docs/implementation/resilient-device-validation/review-plan/architect-r1.md"
     }
   ],
   "invocation": {

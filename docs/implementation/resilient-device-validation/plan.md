@@ -157,7 +157,8 @@ function extractIdentity(item: unknown): string | undefined {
 npm run build
 npm test
 # R4 guard (mechanically enforced): none of the protected files may change in this phase.
-git diff --name-only | grep -qE '^src/(schemas|result|index)\.ts$' && { echo 'R4 violation: a protected file (schemas.ts/result.ts/index.ts) changed'; exit 1; } || true
+# Use `HEAD` so staged/committed edits are caught too, not just unstaged working-tree changes.
+git diff --name-only HEAD | grep -qE '^src/(schemas|result|index)\.ts$' && { echo 'R4 violation: a protected file (schemas.ts/result.ts/index.ts) changed'; exit 1; } || true
 ```
 - The `git diff` guard above exits non-zero if `src/schemas.ts`, `src/result.ts`, or `src/index.ts` is modified in this phase (all Phase 1 work is confined to `src/validation.ts` + the new test file).
 - `deviceSchema.test.ts` still passes unmodified (proves the 3-arg `validate` call and `DeviceSchema` are unchanged — R4).
@@ -282,9 +283,10 @@ const logger = this.config.logger ?? defaultLogger;
 - **Strict, mixed page (R1, R2, R3):** page with `[validDevice, divergentDevice]` → `result.ok === true`, `value.length === 1` (only the valid device), `result.warnings.length === 1` with a `detail` naming the divergent device and the failing path, and `logger.error` called once. Existing "returns validated data" / "paginates automatically" tests must still pass.
 - **Strict, malformed envelope (R5):** response where `devices` is not an array (e.g. `"devices": "nope"`) → `{ ok: false, error: { type: "validation-error" } }`.
 - **Strict, multi-page abort (R5):** page1 valid (with `nextPageUrl` → page2), page2 envelope malformed → `{ ok: false }`, no partial `value`; assert page1's would-be valid device is **not** returned.
+- **Strict, cross-page warnings accumulation (R1, R2, R3):** page1 `[valid1, divergent1]` (with `nextPageUrl` → page2), page2 `[valid2, divergent2]` (terminal, falsy `nextPageUrl`) → `result.ok === true`, `value` contains exactly `valid1` and `valid2` (both valid devices from both pages), `warnings.length === 2` (one entry naming each divergent device), and `logger.error` called twice. Proves the `while (nextUrl)` loop concatenates `valid` and `warnings` across successful pages rather than only returning the last page's.
 - **Warn, logger routing + passthrough (R6, R8):** `validationMode: "warn"`, page with a divergent device → device **still present** in `value` (returned raw), `logger.warn` called, `console.warn` **not** used (assert via a `jest.spyOn(console, "warn")` that stays uncalled).
 - **Warn, malformed envelope hard-fail (R5, Breaking Change #2):** `validationMode: "warn"` with `devices` not an array → `{ ok: false, error: { type: "validation-error" } }`.
-- **Off, malformed envelope passthrough (R8):** `validationMode: "off"` with a divergent device / non-array-free raw page → passes through without failing on shape; no logger calls.
+- **Off, per-device passthrough (R8):** `validationMode: "off"` with a **well-formed page whose `devices` is an array containing a divergent device** → the divergent device flows through untouched into `value` (no drop, no re-parse), no envelope check runs, and **no logger calls** are made. Note: a *non-array* `devices` in `off` is an inherited best-effort edge — `getAllPages` does `items.push(...extractor(page))` and `extractor = (p) => p.devices ?? []`, so a non-array `devices` (object/number) would throw on spread and a string would spread characters; R8's "no fail on shape" does **not** cover that case, so the design's non-array `devices` example is deliberately **not** the off-mode case tested here (it is exercised only under strict/warn, where the envelope check hard-fails first).
 - **`getDeviceByUid` fail-hard + log (R7):** strict, divergent single device → `{ ok: false, error: { type: "validation-error" } }` and `logger.error` called once.
 
 ### Documentation (if needed)
@@ -297,7 +299,8 @@ const logger = this.config.logger ?? defaultLogger;
 npm run build
 npm test
 # R4 guard (mechanically enforced): schemas.ts/result.ts/index.ts must not change — the envelope schema stays internal to client.ts.
-git diff --name-only | grep -qE '^src/(schemas|result|index)\.ts$' && { echo 'R4 violation: a protected file (schemas.ts/result.ts/index.ts) changed'; exit 1; } || true
+# Use `HEAD` so staged/committed edits are caught too, not just unstaged working-tree changes.
+git diff --name-only HEAD | grep -qE '^src/(schemas|result|index)\.ts$' && { echo 'R4 violation: a protected file (schemas.ts/result.ts/index.ts) changed'; exit 1; } || true
 # Doc-landing guard: the release-note section added in the Documentation step must exist.
 grep -q '## Resilient validation' README.md || { echo 'Documentation not landed: missing "## Resilient validation" section in README.md'; exit 1; }
 ```
