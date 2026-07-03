@@ -221,6 +221,35 @@ describe("getAccountDevices resilient validation", () => {
     expect(logger.error).toHaveBeenCalledTimes(1);
   });
 
+  test("strict, an unparseable pageDetails.nextPageUrl hard-fails with a path-named detail and logs (R5)", async () => {
+    const logger = mockLogger();
+    const client = buildClient(
+      {
+        ...authResponses,
+        [DEVICES_URL]: {
+          pageDetails: {
+            count: 0,
+            totalCount: 0,
+            prevPageUrl: null,
+            nextPageUrl: 42,
+          },
+          devices: [],
+        },
+      },
+      { logger },
+    );
+
+    const result = await client.getAccountDevices();
+    expect(result.ok).toBe(false);
+    const r = result as any;
+    expect(r.error.type).toBe("validation-error");
+    expect(r.error.title).toBe("Malformed devices page envelope");
+    expect(r.error.detail).toMatch(/^Malformed devices page envelope \(path:/);
+    expect(r.error.detail).toContain("pageDetails.nextPageUrl");
+    expect(r.error.detail).not.toContain("\n");
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
   test.each([
     ["null", null],
     ["a primitive string (e.g. an HTML error page)", "<html>not json</html>"],

@@ -14,10 +14,11 @@ Typescript package for interacting with the Datto RMM REST API
    omitted field — so a consumer that previously branched on `!result.ok` to detect drift must
    instead inspect `result.warnings.length` (not truthiness: an empty array is truthy).
 2. In `warn` mode, a _structurally malformed_ page envelope (e.g. the response body isn't an
-   object, or `devices` is present but not an array) now returns `{ ok: false, error: { type:
-"validation-error" } }`, where it previously logged and returned `{ ok: true, value: [] }`. A
-   malformed envelope is a protocol error, not per-device drift, and is now treated as a hard
-   failure in every mode that validates at all. `off` is unaffected — it runs no envelope check.
+   object, or `devices` is present but not an array) now returns
+   `{ ok: false, error: { type: "validation-error" } }`, where it previously logged and returned
+   `{ ok: true, value: [] }`. A malformed envelope is a protocol error, not per-device drift, and
+   is now treated as a hard failure in every mode that validates at all. `off` is unaffected — it
+   runs no envelope check.
 3. In `warn` mode, drift diagnostics now route through the client's configured `logger` (never
    `console` directly) and are emitted **one per divergent device** rather than one `console.warn`
    per page — finer-grained than before, but otherwise the returned device data is unchanged.
