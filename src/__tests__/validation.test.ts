@@ -86,7 +86,7 @@ describe("validateItems", () => {
     expect(warnings[0].title).toBe("Device failed schema validation");
     expect(warnings[0].detail).toContain("id=2");
     expect(warnings[0].detail).toContain("name");
-    expect(warnings[0].raw).toBeDefined();
+    expect(warnings[0].raw).toBeInstanceOf(ZodError);
     expect(logger.error).toHaveBeenCalledTimes(1);
     const [message] = (logger.error as jest.Mock).mock.calls[0];
     expect(message).toContain(warnings[0].detail);

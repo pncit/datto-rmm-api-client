@@ -5,8 +5,8 @@ import { ProblemError } from "./result.js";
 export type ValidationMode = "strict" | "warn" | "off";
 
 // Single source of truth for the validation-error ProblemError type/status; reused by
-// toProblemError (below) and by the envelope hard-fail in client.ts (Phase 2), which can't
-// call toProblemError because its title differs.
+// toProblemError (below) and by the envelope hard-fail in client.ts, which can't call
+// toProblemError because its title differs.
 export const VALIDATION_ERROR_TYPE = "validation-error";
 export const VALIDATION_ERROR_STATUS = 400;
 
@@ -87,8 +87,8 @@ export function validateItems<T>(
 
 /**
  * Builds the single `validation-error` ProblemError shape shared by validateItems' rejections
- * and getDeviceByUid's catch (Phase 2). Exported for that reuse; validation.ts is not part of
- * the src/index.ts barrel, so this stays off the public surface.
+ * and getDeviceByUid's catch. Exported for that reuse; validation.ts is not part of the
+ * src/index.ts barrel, so this stays off the public surface.
  */
 export function toProblemError(
   entityLabel: string,
