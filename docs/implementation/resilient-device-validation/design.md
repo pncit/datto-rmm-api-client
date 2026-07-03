@@ -165,7 +165,7 @@ Rollout is a single package version bump. Consumers on `strict` mode gain the re
 
 ### Breaking Changes
 
-None to the public type surface. Two **behavioral** changes worth calling out in release notes:
+None to the public type surface. Three **behavioral** changes worth calling out in release notes:
 
 1. In `strict` mode, `getAccountDevices()` that previously returned `{ ok: false }` on a drifted account now returns `{ ok: true }` with the valid devices and a populated `warnings[]`. A consumer that branches on `!result.ok` to detect drift must instead inspect `result.warnings`. This is the intended fix, not a regression, but it changes the shape of the outcome for drifted accounts.
 2. In `warn` mode, a *structurally malformed* page envelope (e.g. `devices` is not an array) now returns `{ ok: false, error: { type: "validation-error" } }`, where it previously logged and returned `{ ok: true, value: [] }`. This is the intended Decision 2 behavior — a malformed envelope is a protocol error in every mode that validates — and it affects only the envelope, not per-device data, which continues to pass through raw. `off` is unaffected (it runs no envelope check).
