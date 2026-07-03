@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z, ZodError } from "zod/v4";
 import { validate, validateItems } from "../validation";
 import { LoggerLike } from "../logger";
 
@@ -26,22 +26,30 @@ describe("validate", () => {
     const logger = mockLogger();
     expect(() =>
       validate(schema, { id: "nope", name: "a" }, "strict", logger),
-    ).toThrow();
+    ).toThrow(ZodError);
     expect(logger.debug).not.toHaveBeenCalled();
     expect(logger.info).not.toHaveBeenCalled();
     expect(logger.warn).not.toHaveBeenCalled();
     expect(logger.error).not.toHaveBeenCalled();
   });
 
-  test("warn on invalid data returns raw value and logs the failing path via logger.warn", () => {
-    const logger = mockLogger();
-    const data = { id: 1, name: 123 };
-    const result = validate(schema, data, "warn", logger);
-    expect(result).toEqual(data);
-    expect(logger.warn).toHaveBeenCalledTimes(1);
-    const [message] = (logger.warn as jest.Mock).mock.calls[0];
-    expect(message).toContain("name");
-    expect(message).not.toContain("\n");
+  test("warn on invalid data returns raw value and logs the failing path via logger.warn, not console", () => {
+    const consoleWarnSpy = jest
+      .spyOn(console, "warn")
+      .mockImplementation(() => {});
+    try {
+      const logger = mockLogger();
+      const data = { id: 1, name: 123 };
+      const result = validate(schema, data, "warn", logger);
+      expect(result).toEqual(data);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      const [message] = (logger.warn as jest.Mock).mock.calls[0];
+      expect(message).toContain("name");
+      expect(message).not.toContain("\n");
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   test("off returns raw data with no logger calls", () => {
@@ -98,24 +106,32 @@ describe("validateItems", () => {
     expect(warnings[0].detail).toContain("index 0");
   });
 
-  test("warn, mixed returns all items raw/unmutated (unknown keys survive), no warnings", () => {
-    const logger = mockLogger();
-    const validWithExtraKey = { ...validItem, extra: "keepme" };
-    const { valid, warnings } = validateItems(
-      schema,
-      [validWithExtraKey, invalidItem],
-      "warn",
-      "Device",
-      logger,
-    );
-    expect(valid).toEqual([validWithExtraKey, invalidItem]);
-    expect((valid[0] as any).extra).toBe("keepme");
-    expect(warnings).toHaveLength(0);
-    expect(logger.warn).toHaveBeenCalledTimes(1);
-    const [message] = (logger.warn as jest.Mock).mock.calls[0];
-    expect(message).toContain("id=2");
-    expect(message).toContain("name");
-    expect(logger.error).not.toHaveBeenCalled();
+  test("warn, mixed returns all items raw/unmutated (unknown keys survive), no warnings, logs via logger not console", () => {
+    const consoleWarnSpy = jest
+      .spyOn(console, "warn")
+      .mockImplementation(() => {});
+    try {
+      const logger = mockLogger();
+      const validWithExtraKey = { ...validItem, extra: "keepme" };
+      const { valid, warnings } = validateItems(
+        schema,
+        [validWithExtraKey, invalidItem],
+        "warn",
+        "Device",
+        logger,
+      );
+      expect(valid).toEqual([validWithExtraKey, invalidItem]);
+      expect((valid[0] as any).extra).toBe("keepme");
+      expect(warnings).toHaveLength(0);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      const [message] = (logger.warn as jest.Mock).mock.calls[0];
+      expect(message).toContain("id=2");
+      expect(message).toContain("name");
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   test("off, mixed returns all items as-is with no warnings and no logger calls", () => {
