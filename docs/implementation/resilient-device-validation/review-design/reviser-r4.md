@@ -1,8 +1,0 @@
-## reviser — round 4
-
-| ID | Disposition | Rationale (and, for Fix, what changed) |
-|----|-------------|------------------------------------------|
-| engineer-r2-f1 | Fix | Grounded and in-scope: the design showed `validate(schema, data, mode, logger)` as a positional while Success Criteria L186 asserts `deviceSchema.test.ts` still validates *unchanged* — but that test calls `validate(DeviceSchema, device, "strict")` with three args (verified at `src/__tests__/deviceSchema.test.ts:11`), so a required `logger` would break the Verification gate. Tightened the "Logger-aware `validate()`" concept to specify `logger` is an **optional trailing parameter defaulting to `defaultLogger`**, keeping the three-arg test call compiling and the L186 "unchanged" claim honest, and adding that R6's `warn`-routing guarantee relies on the client passing `config.logger ?? defaultLogger` at the live call site (which it does). No mechanism change. |
-| engineer-r2-f2 | Fix | Grounded and in-scope: `warn`-mode drift diagnostics change granularity (one page-level `console.warn` → one `logger.warn` per divergent device), an observable change in a mode whose purpose is drift visibility, and it was undocumented among the release-noted behavioral changes. Added Breaking Changes item 3 noting the granularity shift alongside the already-documented sink change, framing it as a deliberate, release-noted outcome. Half-sentence tightening, no mechanism change. |
-
-Architect round 2 raised no `Open` findings — architect-r2-f1/f2/f3 are all `Closed` (two resolved, one accepted-as-rejected). No dispositions required for that thread.
