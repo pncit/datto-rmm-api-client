@@ -37,6 +37,8 @@
 - Preserve the `warn` and `off` **returned-data** contracts exactly: in `warn`, every device (valid or not) is returned **raw and unparsed** (never re-parsed, which would strip unknown keys); in `off`, nothing is validated or logged. The only behavioral break allowed is the envelope hard-fail in `warn` (design Decision 2 / Breaking Change #2).
 - `validate()`'s new `logger` parameter is an **optional trailing** parameter defaulting to `defaultLogger`, so existing 3-arg calls (e.g. in `deviceSchema.test.ts`) keep compiling untouched.
 - `validate()` must **not** log in `strict` mode — it throws, and the caller (`getDeviceByUid`) decides fatality and emits the error log. The per-item helper, which does not throw, owns its own error/warn logging.
+- **One error shape, one message.** Every `type: "validation-error"` `ProblemError` (per-device rejections, the `getDeviceByUid` catch, and the envelope hard-fail) uses a **short stable `title`**, specifics in `detail`, and the `ZodError` in `raw` — never the serialized `ZodError.message` in `title`. The per-device and `getDeviceByUid` sites share the exported `toProblemError(entityLabel, …)` builder; the envelope site follows the same convention with title `"Malformed devices page envelope"`. Log lines interpolate the corresponding `detail` (which names the device/field), not the bare `ZodError.message`, so logs and `warnings[]` describe the same failure.
+- `validateItems`/`toProblemError` are **generic** and take an `entityLabel` (`"Device"` today) rather than hardcoding device copy, so the design's stated reuse for a future paginated collection endpoint is not blocked. `toProblemError` is exported from `validation.ts`, which is **not** in the `src/index.ts` barrel, so it stays off the public surface.
 
 ---
 
@@ -51,12 +53,12 @@ Turn the single validation module into the two primitives the resilient paginati
 1. **Add a logger-aware `validate()` overload-compatible signature**: give `validate` an optional trailing `logger: LoggerLike = defaultLogger` and route the `warn` diagnostic through `logger.warn`. Leave `strict` (throw, no log) and `off` (raw passthrough) semantics exactly as they are.
    - Files: `src/validation.ts`
    - Notes: Import `defaultLogger` and `LoggerLike` from `./logger.js`. The default keeps `deviceSchema.test.ts`'s 3-arg call compiling. Do **not** log in `strict`.
-2. **Add the `validateItems()` per-item helper**: validate each element of `unknown[]` against a `ZodType<T>`, partitioning by mode into `{ valid: T[]; warnings: ProblemError[] }`.
+2. **Add the `validateItems()` per-item helper**: validate each element of `unknown[]` against a `ZodType<T>`, partitioning by mode into `{ valid: T[]; warnings: ProblemError[] }`. The helper is **generic** — it takes an `entityLabel: string` (the caller passes `"Device"`) so no domain copy is hardcoded and it can be reused for a future paginated collection endpoint (design Future Considerations) without emitting "Device …" for non-devices.
    - Files: `src/validation.ts`
-   - Notes: `off` → all items pass through as `T`, no logging, no warnings. `warn` → every item returned **raw** (both would-validate and divergent), each divergence logged via `logger.warn`, nothing dropped, no warnings pushed. `strict` → only valid items returned (parsed), each divergent item logged via `logger.error` and pushed to `warnings`.
-3. **Add a private `toProblemError()` (+ best-effort id extraction)** used by `validateItems` for strict rejections.
+   - Notes: Signature `validateItems<T>(schema, items, mode, entityLabel, logger = defaultLogger)`. `off` → all items pass through as `T` (guarded by `Array.isArray` — a non-array `items` yields `[]`, never a thrown `TypeError`), no logging, no warnings. `warn` → every item returned **raw** (both would-validate and divergent), each divergence logged via `logger.warn`, nothing dropped, no warnings pushed. `strict` → only valid items returned (parsed), each divergent item logged via `logger.error` and pushed to `warnings`. In **both** `warn` and `strict`, build the per-item `ProblemError` **once** via `toProblemError` and interpolate its `detail` (identity + failing path) into the log line — the log and the `warnings[]` entry must name the same device and field, not the bare `ZodError.message`.
+3. **Add and export `toProblemError()` (+ best-effort id extraction)** used by `validateItems` for its rejections and reused by `getDeviceByUid` in Phase 2 so all `validation-error` `ProblemError`s share one shape.
    - Files: `src/validation.ts`
-   - Notes: `type: "validation-error"`, `status: 400`; `detail` names the device (`id=`/`uid=` extracted best-effort from the raw object, else `index N`) and the first Zod issue `path`; put the whole `ZodError` in `raw`. Import `ProblemError` from `./result.js` and `ZodError`/`ZodType` from `zod/v4`.
+   - Notes: Signature `toProblemError(entityLabel, error, item, index)`. `type: "validation-error"`, `status: 400`; a **short stable** `title` (`` `${entityLabel} failed schema validation` ``); `detail` names the entity (`id=`/`uid=` extracted best-effort from the raw object, else `index N`) and the first Zod issue `path`; put the whole `ZodError` in `raw`. `export` it from `validation.ts` (which is **not** re-exported by the `src/index.ts` barrel, so this stays off the public surface — architect confirmed `validation.ts` is not barrelled) so `getDeviceByUid` can reuse it. Import `ProblemError` from `./result.js` and `ZodError`/`ZodType` from `zod/v4`.
 
 ### Opinionated Implementation Notes (Examples)
 ```ts
@@ -89,13 +91,16 @@ export function validate<T>(
 }
 
 // Array seam (used by the pagination path). Never throws — partitions and continues.
+// Generic: `entityLabel` ("Device") is injected so no domain copy is hardcoded (reusable per design).
 export function validateItems<T>(
   schema: ZodType<T>,
   items: unknown[],
   mode: ValidationMode,
+  entityLabel: string,
   logger: LoggerLike = defaultLogger,
 ): { valid: T[]; warnings: ProblemError[] } {
-  if (mode === "off") return { valid: items as T[], warnings: [] };
+  // off: raw passthrough. Array.isArray guard keeps a non-array `items` from throwing on spread upstream.
+  if (mode === "off") return { valid: (Array.isArray(items) ? items : []) as T[], warnings: [] };
 
   const valid: T[] = [];
   const warnings: ProblemError[] = [];
@@ -106,25 +111,33 @@ export function validateItems<T>(
       valid.push(mode === "warn" ? (item as T) : result.data);
       return;
     }
+    // Build the ProblemError once; its `detail` (identity + failing path) drives BOTH the log line and warnings[].
+    const problem = toProblemError(entityLabel, result.error, item, index);
     if (mode === "warn") {
-      logger.warn(`Validation warning: ${result.error.message}`);
+      logger.warn(`Validation warning: ${problem.detail}`);
       valid.push(item as T);            // nothing dropped in warn
     } else {
-      logger.error(`Validation error: ${result.error.message}`);
-      warnings.push(toProblemError(result.error, item, index)); // dropped -> warnings (strict)
+      logger.error(`Validation error: ${problem.detail}`); // names which device + field, not a raw ZodError dump
+      warnings.push(problem);           // dropped -> warnings (strict)
     }
   });
   return { valid, warnings };
 }
 
-function toProblemError(error: ZodError, item: unknown, index: number): ProblemError {
+// Exported so getDeviceByUid can reuse it. validation.ts is NOT in the src/index.ts barrel -> stays non-public.
+export function toProblemError(
+  entityLabel: string,
+  error: ZodError,
+  item: unknown,
+  index: number,
+): ProblemError {
   const identity = extractIdentity(item) ?? `index ${index}`;
   const path = error.issues[0]?.path?.join(".") || "(root)";
   return {
     type: "validation-error",
-    title: "Device failed schema validation",
+    title: `${entityLabel} failed schema validation`,   // short stable title; specifics go in detail, full error in raw
     status: 400,
-    detail: `Device ${identity} failed validation at path: ${path}`,
+    detail: `${entityLabel} ${identity} failed validation at path: ${path}`,
     raw: error,
   };
 }
@@ -143,11 +156,12 @@ function extractIdentity(item: unknown): string | undefined {
 - Add `src/__tests__/validation.test.ts`.
 - Build a minimal schema inline (e.g. `z.object({ id: z.number(), name: z.string() })`) and a capturing mock logger `{ debug/info/warn/error: jest.fn() }`.
 - `validate()` cases: `strict` on valid returns parsed value; `strict` on invalid **throws a `ZodError`** and does **not** call any logger method; `warn` on invalid returns the raw value and calls `logger.warn` (not `console`); `off` returns raw with no logger calls; 3-arg call (no logger) still works (uses default).
-- `validateItems()` cases:
-  - `strict`, mixed `[valid, invalid]` → `valid` contains exactly the parsed valid item; `warnings` has one entry with `type: "validation-error"`, a `detail` naming the item (`id=`/`uid=`) and the failing path, and a `ZodError` in `raw`; `logger.error` called once, `logger.warn` never.
+- `validateItems()` cases (pass `entityLabel: "Device"`):
+  - `strict`, mixed `[valid, invalid]` → `valid` contains exactly the parsed valid item; `warnings` has one entry with `type: "validation-error"`, a short `title` (`"Device failed schema validation"`), a `detail` naming the item (`id=`/`uid=`) and the failing path, and a `ZodError` in `raw`; `logger.error` called once **with a message containing that same `detail` string** (assert the log names the device + field, not the bare `ZodError.message`), `logger.warn` never.
   - `strict`, invalid item **missing id and uid** → `detail` falls back to `index N`.
-  - `warn`, mixed → all items returned **raw/unmutated** (assert an unknown extra key on the valid item survives, proving no re-parse), `warnings` empty, `logger.warn` called once per divergent item, `logger.error` never.
+  - `warn`, mixed → all items returned **raw/unmutated** (assert an unknown extra key on the valid item survives, proving no re-parse), `warnings` empty, `logger.warn` called once per divergent item **with the identity + path message**, `logger.error` never.
   - `off`, mixed → all items returned as-is, `warnings` empty, no logger calls.
+  - `off`, `items` deliberately **not an array** (pass a non-array value) → returns `{ valid: [], warnings: [] }` and does **not** throw (guards the spread upstream).
 
 ### Documentation (if needed)
 - None in this phase (internal seam). Release-note-worthy behavior changes are captured in Phase 2 docs.
@@ -178,23 +192,23 @@ Rewire `getAllPages` to validate the page **envelope** structurally (via a direc
    - Notes: `const DevicesEnvelopeSchema = z.object({ pageDetails: PaginationDataSchema.optional(), devices: z.array(z.unknown()).optional() })` and `type DevicesEnvelope = z.infer<typeof DevicesEnvelopeSchema>`. Import `z` and `PaginationDataSchema` from `./schemas.js`. Must **not** be `export`ed. `DevicesPageSchema` stays exported/unchanged in `schemas.ts`.
 2. **Rewrite `getAllPages`** to the new signature `getAllPages<T, P>(url, token, params, envelopeSchema, itemSchema, extractor: (page: P) => unknown[])`.
    - Files: `src/client.ts`
-   - Notes: Resolve `const logger = this.config.logger ?? defaultLogger` once. Per page: in `off`, treat `res.value as P` and read `pageDetails?.nextPageUrl` best-effort (no envelope check, no logging); in `strict`/`warn`, `envelopeSchema.safeParse(res.value)` directly — **not** `validate()` — and on failure return `{ ok: false, error: { type: "validation-error", title, status: 400, raw } }` (R5). Then `validateItems(itemSchema, extractor(page), this.validationMode, logger)`, pushing `valid` into the accumulator and `warnings` into a page-spanning `warnings[]`. Advance `nextUrl = page.pageDetails?.nextPageUrl`. On completion `return { ok: true, value: items, warnings }`. A mid-walk envelope failure discards accumulated `items`/`warnings` (returns `{ ok: false }`), exactly as pagination cannot continue past an unreadable `nextPageUrl`.
+   - Notes: Resolve `const logger = this.config.logger ?? defaultLogger` once. Per page: in `off`, treat `res.value as P` and read `pageDetails?.nextPageUrl` best-effort (no envelope check, no logging); in `strict`/`warn`, `envelopeSchema.safeParse(res.value)` directly — **not** `validate()`. On envelope failure, first `logger.error(...)` (naming the page URL and the parse error — this is the loudest, protocol-level failure and must be observable through the same logger as per-device drift; in `warn` it also replaces the old page-level `console.warn`), then return `{ ok: false, error: { type: "validation-error", title: "Malformed devices page envelope", status: 400, detail: parsed.error.message, raw: parsed.error } }` (R5) — a **short stable** `title` with the serialized error in `detail`, mirroring `toProblemError`'s convention (do **not** dump `parsed.error.message` into `title`). Then `validateItems(itemSchema, extractor(page), this.validationMode, "Device", logger)`, pushing `valid` into the accumulator and `warnings` into a page-spanning `warnings[]`. Advance `nextUrl = page.pageDetails?.nextPageUrl`. On completion `return { ok: true, value: items, warnings }`. A mid-walk envelope failure discards accumulated `items`/`warnings` (returns `{ ok: false }`), exactly as pagination cannot continue past an unreadable `nextPageUrl`.
 3. **Update `getAccountDevices`** to call the new `getAllPages`.
    - Files: `src/client.ts`
    - Notes: `getAllPages<Device, DevicesEnvelope>(url, token, params, DevicesEnvelopeSchema, DeviceSchema, (p) => p.devices ?? [])`. Return type stays `Result<Device[]>`.
 4. **Update `getDeviceByUid`** to declare a `logger` local, pass it to `validate`, and log at error level on a `ZodError` in its `catch`.
    - Files: `src/client.ts`
-   - Notes: **First**, resolve `const logger = this.config.logger ?? defaultLogger;` at the top of `getDeviceByUid` (mirroring the Step 2 line in `getAllPages`) — the current method has no `logger` in scope, so without this both the `validate(...)` call and the `catch` `logger.error(...)` fail to compile (`Cannot find name 'logger'`) and Phase 2's own exit gate cannot pass. Then call `validate(DeviceSchema, res.value, this.validationMode, logger)`; in the `catch`, when `e instanceof ZodError`, call `logger.error(...)` **before** returning `{ ok: false, error: { type: "validation-error", ... } }` (R7). Keep the `unknown-error` branch. `validate` itself still does not log in strict, so this is the single error log (no double-logging).
+   - Notes: **First**, resolve `const logger = this.config.logger ?? defaultLogger;` at the top of `getDeviceByUid` (mirroring the Step 2 line in `getAllPages`) — the current method has no `logger` in scope, so without this both the `validate(...)` call and the `catch` `logger.error(...)` fail to compile (`Cannot find name 'logger'`) and Phase 2's own exit gate cannot pass. Then call `validate(DeviceSchema, res.value, this.validationMode, logger)`; in the `catch`, when `e instanceof ZodError`, build the error with the **same** `toProblemError("Device", e, res.value, 0)` builder used by `validateItems` so all three `validation-error` sites share one shape (short stable `title`, specifics in `detail`, `ZodError` in `raw`) — replacing the preexisting `title: e.message` dump — and `logger.error(...)` with that error's `detail` **before** returning `{ ok: false, error: toProblemError("Device", e, res.value, 0) }` (R7). Keep the `unknown-error` branch unchanged. `validate` itself still does not log in strict, so this is the single error log (no double-logging).
 5. **Clean up imports** in `client.ts`.
    - Files: `src/client.ts`
-   - Notes: Add `validateItems` and keep `validate`; add `z` + `PaginationDataSchema`; drop now-unused `DevicesPageSchema`/`DevicesPage` imports if unreferenced (they remain defined/exported in `schemas.ts`). Ensure `defaultLogger` and `ProblemError` are imported.
+   - Notes: Add `validateItems` and `toProblemError` and keep `validate`; add `z` + `PaginationDataSchema`; drop now-unused `DevicesPageSchema`/`DevicesPage` imports if unreferenced (they remain defined/exported in `schemas.ts`). Ensure `defaultLogger` is imported. `ProblemError` is only needed as a type for the page-spanning `warnings[]` accumulator — import it if referenced.
 
 ### Opinionated Implementation Notes (Examples)
 ```ts
 // src/client.ts (internal, NOT exported)
 import { z, ZodType } from "zod/v4";
 import { DeviceSchema, Device, PaginationDataSchema } from "./schemas.js";
-import { validate, validateItems, ValidationMode } from "./validation.js";
+import { validate, validateItems, toProblemError, ValidationMode } from "./validation.js";
 import { defaultLogger } from "./logger.js";
 import { Result, ProblemError } from "./result.js";
 
@@ -236,12 +250,23 @@ private async getAllPages<
     } else {
       const parsed = envelopeSchema.safeParse(res.value); // direct safeParse — NOT validate()
       if (!parsed.success) {
-        return { ok: false, error: { type: "validation-error", title: parsed.error.message, status: 400, raw: parsed.error } };
+        logger.error(`Malformed devices page envelope at ${nextUrl}: ${parsed.error.message}`); // loudest failure -> observable
+        return {
+          ok: false,
+          error: {
+            type: "validation-error",
+            title: "Malformed devices page envelope", // short stable title; error blob goes in detail/raw
+            status: 400,
+            detail: parsed.error.message,
+            raw: parsed.error,
+          },
+        };
       }
       page = parsed.data;
     }
 
-    const partition = validateItems(itemSchema, extractor(page), this.validationMode, logger);
+    // entityLabel "Device"; validateItems' off branch is Array.isArray-guarded so a non-array devices never throws.
+    const partition = validateItems(itemSchema, extractor(page), this.validationMode, "Device", logger);
     items.push(...partition.valid);
     warnings.push(...partition.warnings);
 
@@ -271,8 +296,9 @@ const logger = this.config.logger ?? defaultLogger;
 // ... validate(DeviceSchema, res.value, this.validationMode, logger) inside the try ...
 } catch (e) {
   if (e instanceof ZodError) {
-    logger.error(`Device validation failed for ${deviceUid}: ${e.message}`);
-    return { ok: false, error: { type: "validation-error", title: e.message, status: 400, raw: e } };
+    const problem = toProblemError("Device", e, res.value, 0); // same builder/shape as validateItems
+    logger.error(`Device validation failed for ${deviceUid}: ${problem.detail}`);
+    return { ok: false, error: problem };
   }
   return { ok: false, error: { type: "unknown-error", title: String(e), status: 500, raw: e } };
 }
@@ -281,13 +307,15 @@ const logger = this.config.logger ?? defaultLogger;
 ### Tests (in this phase)
 - Extend `src/__tests__/devicesMethod.test.ts` (reuse its `MockAxios`) and add a capturing mock logger passed via `createDattoRmmClient({ ..., logger })`. Build divergent payloads by cloning the valid `device.json` fixture and mutating one copy (e.g. `deviceClass: "router"` — outside the enum) rather than adding many fixtures.
 - **Strict, mixed page (R1, R2, R3):** page with `[validDevice, divergentDevice]` → `result.ok === true`, `value.length === 1` (only the valid device), `result.warnings.length === 1` with a `detail` naming the divergent device and the failing path, and `logger.error` called once. Existing "returns validated data" / "paginates automatically" tests must still pass.
-- **Strict, malformed envelope (R5):** response where `devices` is not an array (e.g. `"devices": "nope"`) → `{ ok: false, error: { type: "validation-error" } }`.
+- **Envelope schema accepts existing fixtures (design Risks & Mitigations row 3):** assert `DevicesEnvelopeSchema.safeParse(...)` succeeds (`.success === true`) on each existing page fixture (`devicesPage.json`, `devicesPage1.json`, `devicesPage2.json`), guarding the envelope-vs-`DevicesPageSchema` `pageDetails` consistency directly rather than by side effect. (The envelope schema is non-exported; reference it via a small test-only re-export or by importing the module under test — keep it out of `src/index.ts`.)
+- **Strict, malformed envelope (R5) + log:** response where `devices` is not an array (e.g. `"devices": "nope"`) → `{ ok: false, error: { type: "validation-error", title: "Malformed devices page envelope" } }`, and `logger.error` called once (envelope failure is observable through the configured logger, not silent).
 - **Strict, multi-page abort (R5):** page1 valid (with `nextPageUrl` → page2), page2 envelope malformed → `{ ok: false }`, no partial `value`; assert page1's would-be valid device is **not** returned.
 - **Strict, cross-page warnings accumulation (R1, R2, R3):** page1 `[valid1, divergent1]` (with `nextPageUrl` → page2), page2 `[valid2, divergent2]` (terminal, falsy `nextPageUrl`) → `result.ok === true`, `value` contains exactly `valid1` and `valid2` (both valid devices from both pages), `warnings.length === 2` (one entry naming each divergent device), and `logger.error` called twice. Proves the `while (nextUrl)` loop concatenates `valid` and `warnings` across successful pages rather than only returning the last page's.
 - **Warn, logger routing + passthrough (R6, R8):** `validationMode: "warn"`, page with a divergent device → device **still present** in `value` (returned raw), `logger.warn` called, `console.warn` **not** used (assert via a `jest.spyOn(console, "warn")` that stays uncalled).
-- **Warn, malformed envelope hard-fail (R5, Breaking Change #2):** `validationMode: "warn"` with `devices` not an array → `{ ok: false, error: { type: "validation-error" } }`.
-- **Off, per-device passthrough (R8):** `validationMode: "off"` with a **well-formed page whose `devices` is an array containing a divergent device** → the divergent device flows through untouched into `value` (no drop, no re-parse), no envelope check runs, and **no logger calls** are made. Note: a *non-array* `devices` in `off` is an inherited best-effort edge — `getAllPages` does `items.push(...extractor(page))` and `extractor = (p) => p.devices ?? []`, so a non-array `devices` (object/number) would throw on spread and a string would spread characters; R8's "no fail on shape" does **not** cover that case, so the design's non-array `devices` example is deliberately **not** the off-mode case tested here (it is exercised only under strict/warn, where the envelope check hard-fails first).
-- **`getDeviceByUid` fail-hard + log (R7):** strict, divergent single device → `{ ok: false, error: { type: "validation-error" } }` and `logger.error` called once.
+- **Warn, malformed envelope hard-fail (R5, Breaking Change #2) + log:** `validationMode: "warn"` with `devices` not an array → `{ ok: false, error: { type: "validation-error", title: "Malformed devices page envelope" } }`, and `logger.error` called once (replacing the old page-level `console.warn`).
+- **Off, per-device passthrough (R8):** `validationMode: "off"` with a **well-formed page whose `devices` is an array containing a divergent device** → the divergent device flows through untouched into `value` (no drop, no re-parse), no envelope check runs, and **no logger calls** are made.
+- **Off, non-array `devices` does not throw (Result-contract guard):** `validationMode: "off"` with a page whose `devices` is a non-array object → `getAllPages` returns `{ ok: true }` (that page contributes zero items) rather than throwing a `TypeError` out of `getAccountDevices`. This is guaranteed by `validateItems`' `off` branch `Array.isArray` guard (Phase 1), keeping the Result contract — every failure returned as `{ ok: false }`, never thrown — mode-independent even though `off` runs no envelope check.
+- **`getDeviceByUid` fail-hard + log (R7):** strict, divergent single device → `{ ok: false, error: { type: "validation-error", title: "Device failed schema validation" } }` (the shared `toProblemError` shape — short stable `title`, `ZodError` in `raw`, not the old `title: e.message` dump) and `logger.error` called once.
 
 ### Documentation (if needed)
 - Files: `README.md`.

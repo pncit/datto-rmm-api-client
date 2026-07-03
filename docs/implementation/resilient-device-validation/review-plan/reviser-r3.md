@@ -1,0 +1,21 @@
+## reviser — round 3
+
+Mode B, Phase 2 feedback. Performed an internal self-review (phasing, specificity, exit gates, edge
+cases, hidden complexity, dependencies, design alignment) and folded its results into this revision
+with no separate output. Then addressed every `Open` finding from both the Architect and Engineer
+turns. All fixes are edited directly into `plan.md` (no revision markers). Two pairs of findings are
+the same underlying issue (architect-r1-f1 ≡ engineer-r1-f4 on device-hardcoding; architect-r1-f2 ≡
+engineer-r1-f3 on `ZodError` in `title`) and were resolved by one change each; both rows are recorded.
+
+| ID | Disposition | Rationale |
+|----|-------------|-----------|
+| architect-r1-f1 | Accept | Took option (a): `validateItems<T>`/`toProblemError` now take an injected `entityLabel: string` (caller passes `"Device"`), so the generic seam carries no device copy and the design's stated reuse for future paginated endpoints is unblocked. Updated Phase 1 Step 2/3, the code example, and the Implementation Notes. |
+| architect-r1-f2 | Accept | The envelope-failure `ProblemError` now uses a short stable `title: "Malformed devices page envelope"` with `parsed.error.message` in `detail` and the `ZodError` in `raw`, mirroring `toProblemError`'s convention instead of dumping the error blob in `title`. Updated Phase 2 Step 2 and the code example. |
+| architect-r1-f3 | Accept | Added the design-mandated Phase 2 test asserting `DevicesEnvelopeSchema.safeParse(...)` succeeds on every existing page fixture (`devicesPage.json`, `devicesPage1.json`, `devicesPage2.json`), guarding envelope-vs-`DevicesPageSchema` `pageDetails` consistency directly. |
+| architect-r1-f4 | Accept | `validateItems`' `off` branch now guards with `Array.isArray(items) ? … : []`, so a non-array `devices` in `off` yields an empty page instead of a thrown `TypeError` escaping `getAccountDevices`, keeping the Result contract mode-independent. Added a Phase 1 unit case and a Phase 2 client case; rewrote the former off-mode "not covered" note. |
+| engineer-r1-f1 | Accept | `validateItems` now builds the `ProblemError` once per divergent item and interpolates its `detail` (identity + failing path) into the `logger.error`/`logger.warn` line, so the log names which device and field drifted rather than dumping the bare `ZodError.message`. Test assertions updated to check the log message contains that `detail`. |
+| engineer-r1-f2 | Accept | Added `logger.error(...)` at the envelope hard-fail branch in `getAllPages` (naming the page URL + parse error) before returning `{ ok: false }`, closing the `warn`-mode observability regression vs. the old `console.warn`. Added a log assertion to both malformed-envelope tests. |
+| engineer-r1-f3 | Accept | Unified all three `validation-error` sites: the per-device and `getDeviceByUid` paths share the exported `toProblemError("Device", …)` builder, and the envelope path follows the same convention (short stable `title`, specifics in `detail`, `ZodError` in `raw`). `getDeviceByUid`'s preexisting `title: e.message` is replaced since that catch is already being edited. |
+| engineer-r1-f4 | Accept | Same resolution as architect-r1-f1 — parameterized `entityLabel` on `validateItems`/`toProblemError` (option (a)), so a reused helper never mislabels non-devices. |
+| engineer-r1-f5 | Accept (partial) | Removed the intra-`validateItems` duplication: its `warn` and `error` lines now share one source of truth (`problem.detail`). Declined further factoring across `validate` and `validateItems` — the single-value seam has no per-item identity and its `warn` message serves a different shape; a shared formatter there would couple two distinct concerns for little gain (reviewer flagged this Low and warned against over-abstraction). |
+| engineer-r1-f6 | Reject | The six-positional-param `getAllPages` has exactly one caller and the reviewer explicitly scoped an options-object refactor as optional ("raise only if a second list endpoint adopts the pattern"). Introducing an options bag now adds indirection with no present payoff; deferred until a second paginated endpoint actually adopts the pattern, consistent with the design's reuse being a Future Consideration. |
