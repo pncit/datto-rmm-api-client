@@ -1,0 +1,7 @@
+## reviser — round 6
+
+| ID | Disposition | Rationale (and, for Fixed, what changed) |
+|----|-------------|-------------------------------------------|
+| architect-r3-f1 | Fixed | `src/validation.ts`: made `VALIDATION_WARN_PREFIX` and `VALIDATION_ERROR_PREFIX` `export const` (previously module-private `const`), matching the already-exported `VALIDATION_ERROR_TYPE`/`VALIDATION_ERROR_STATUS` sibling pair. Their own doc comment (unchanged) already claimed reuse by "the envelope hard-fail in client.ts"; since a non-exported const can't be imported across files, Phase 2's `client.ts` would have been forced to hand-copy the `"Validation warning"`/`"Validation error"` string literals, reintroducing the exact single-source-of-truth drift this constant pair (`engineer-r1-f3`) was introduced to eliminate. Exporting closes that gap rather than walking back the comment's claim. Updated `implementation-phase1-notes.md` §4/§5 to record the export as an additional deviation-from-plan-snippet, consistent with how the other three `reviser-r4` structural additions are already documented there. Verified `npx tsc --noEmit` is clean and all 13 `validation.test.ts` tests still pass (no test imports these constants by name, so no test changes were needed). |
+
+No other `Open` findings remain across the four reviewers this round: engineer-r3, project-lead-r3, and typescript-cop-r3 each re-verified their prior findings as `Closed` with no regressions and raised nothing new.

@@ -12,8 +12,10 @@ export const VALIDATION_ERROR_STATUS = 400;
 
 // Shared log-line prefixes so every validation-error/warning site (single-value, per-item,
 // and — in client.ts — the envelope hard-fail) emits one consistent, greppable message shape.
-const VALIDATION_WARN_PREFIX = "Validation warning";
-const VALIDATION_ERROR_PREFIX = "Validation error";
+// Exported (matching VALIDATION_ERROR_TYPE/_STATUS above) so client.ts's envelope hard-fail can
+// import the same prefixes instead of hand-copying the string literals.
+export const VALIDATION_WARN_PREFIX = "Validation warning";
+export const VALIDATION_ERROR_PREFIX = "Validation error";
 
 /**
  * Names the first failing Zod issue's path, or "(root)" when the issue has no path. Single
