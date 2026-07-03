@@ -898,6 +898,121 @@
       },
       "session_id": "2ed85074-e256-4ba8-a611-998f2f9232be",
       "turn": "docs/implementation/resilient-device-validation/review-plan/architect-r4.md"
+    },
+    {
+      "t": 1783115621,
+      "kind": "worker",
+      "agent": "planner",
+      "label": "plan:p2 reviser r6",
+      "ok": true,
+      "started_at": "2026-07-03T21:51:53+00:00",
+      "duration_s": 107.9,
+      "api_duration_s": 100.2,
+      "turns": 16,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.9098,
+      "tokens": {
+        "input": 694,
+        "output": 6982,
+        "cache_read": 510011,
+        "cache_creation": 47680
+      },
+      "session_id": "30267e30-e2eb-4931-a723-6358ceba0469",
+      "turn": "docs/implementation/resilient-device-validation/review-plan/reviser-r6.md"
+    },
+    {
+      "t": 1783115719,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "plan:p2 architect r5",
+      "ok": true,
+      "started_at": "2026-07-03T21:53:41+00:00",
+      "duration_s": 97.7,
+      "api_duration_s": 84.1,
+      "turns": 15,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.8408,
+      "tokens": {
+        "input": 11196,
+        "output": 5888,
+        "cache_read": 254305,
+        "cache_creation": 51043
+      },
+      "session_id": "53077f36-bbed-46ae-acfd-99fb7cb85ba6",
+      "turn": "docs/implementation/resilient-device-validation/review-plan/architect-r5.md"
+    },
+    {
+      "t": 1783115751,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "plan:p2 engineer r5",
+      "ok": true,
+      "started_at": "2026-07-03T21:53:41+00:00",
+      "duration_s": 130.2,
+      "api_duration_s": 124.5,
+      "turns": 12,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.9106,
+      "tokens": {
+        "input": 11192,
+        "output": 8870,
+        "cache_read": 167436,
+        "cache_creation": 54917
+      },
+      "session_id": "96b98e1a-41d5-49f5-8d2c-bd12439f4e70",
+      "turn": "docs/implementation/resilient-device-validation/review-plan/engineer-r5.md"
+    },
+    {
+      "t": 1783115798,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "plan:p2 architect r5 (retry)",
+      "ok": true,
+      "started_at": "2026-07-03T21:55:19+00:00",
+      "duration_s": 79.3,
+      "api_duration_s": 72.2,
+      "turns": 13,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.8013,
+      "tokens": {
+        "input": 682,
+        "output": 5164,
+        "cache_read": 221745,
+        "cache_creation": 55794
+      },
+      "session_id": "a6d3229c-3c1b-46e7-bbc9-e1d2f66cf482",
+      "turn": "docs/implementation/resilient-device-validation/review-plan/architect-r5.md"
+    },
+    {
+      "t": 1783115924,
+      "kind": "worker",
+      "agent": "process-historian",
+      "label": "plan historian",
+      "ok": true,
+      "started_at": "2026-07-03T21:56:38+00:00",
+      "duration_s": 126.1,
+      "api_duration_s": 118.3,
+      "turns": 26,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.9834,
+      "tokens": {
+        "input": 2651,
+        "output": 8212,
+        "cache_read": 301851,
+        "cache_creation": 61392
+      },
+      "session_id": "8643707c-2fa2-4ba7-bbed-9c95d1fc4ba6",
+      "turn": "docs/implementation/resilient-device-validation/plan-process-artifact.md"
     }
   ],
   "invocation": {
