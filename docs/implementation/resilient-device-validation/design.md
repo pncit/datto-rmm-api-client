@@ -40,7 +40,7 @@ The cost of inaction is a standing outage for any account whose inventory drifts
 | R2 | Each device that fails `DeviceSchema` in strict mode is excluded from the returned array and recorded in `Result.warnings[]` as a `ProblemError` that identifies the device (id/uid where extractable) and the failing validation path. | Functional | Issue #13 fix 1 |
 | R3 | Every dropped-device validation failure is logged at **error** level through the configured `config.logger` (`LoggerLike`), never `console` directly. | Functional | Issue #13 fix 3 + drift-signal decision |
 | R4 | The public `Device` type and `DeviceSchema` are unchanged — no fields relaxed to optional/nullable, no enums widened or given catch fallbacks. | Non-functional | Type-stability decision |
-| R5 | A structurally malformed page envelope (response not an object, `devices` not an array, unparseable `pageDetails`/`nextPageUrl`) fails the call with `{ ok: false, error: { type: "validation-error" } }`. Envelope errors are protocol errors, distinct from per-device drift. | Functional | Design decision |
+| R5 | In `strict`/`warn` modes, a structurally malformed page envelope (response not an object, `devices` not an array, unparseable `pageDetails`/`nextPageUrl`) fails the call with `{ ok: false, error: { type: "validation-error" } }`. Envelope errors are protocol errors, distinct from per-device drift. Envelope validation is mode-gated and does not run in `off`, which preserves its raw-passthrough contract. | Functional | Design decision |
 | R6 | `validate()` accepts the configured logger; in `warn` mode it emits its diagnostic through `logger.warn` rather than `console.warn`. | Functional | Issue #13 fix 3 |
 | R7 | `getDeviceByUid()` in strict mode continues to return `{ ok: false }` on a divergent device (no partial result is possible for a single device) and logs the failure at error level through `config.logger`. | Functional | Consistency with R1/R3 |
 | R8 | `warn` and `off` modes preserve their current returned-data contract (all device data flows through, nothing dropped); only log routing changes — `warn` diagnostics go through `config.logger.warn`, `off` logs nothing. | Non-functional | Backward compatibility |
@@ -94,6 +94,8 @@ const DevicesEnvelopeSchema = z.object({
 
 `DevicesPageSchema` and `DeviceSchema` remain exported and unchanged (R4); the envelope schema is an internal detail of the pagination path.
 
+**Generic `getAllPages` plumbing.** Today `getAllPages<T, P>` takes one page schema and an `extractor: (page: P) => T[]` that receives an *already-parsed* page and returns typed items. The per-item model changes this: the method takes an **envelope schema** (validating `P` with its items opaque) plus a **per-item schema** (`DeviceSchema`, applied to each element separately), and the extractor now pulls the *raw* items — `extractor: (page) => unknown[]` — from the envelope-validated page. So the new signature is `getAllPages<T, P>(envelopeSchema, itemSchema, extractor: (page: P) => unknown[], ...)`. For each page, `getAllPages` runs the envelope schema, calls the per-item helper on the extracted `unknown[]`, and accumulates both the surviving `valid` items and the `warnings` across every page; when the walk completes it returns `{ ok: true, value: <all valid items>, warnings: <all accumulated warnings> }`. The extractor's return type therefore changes from `T[]` to `unknown[]` — this is not preserved behavior.
+
 **Per-item validation helper.** A function that applies `DeviceSchema` to each raw device and partitions the results by the mode, returning both the surviving devices and the rejections as `ProblemError`s:
 
 ```ts
@@ -107,7 +109,7 @@ function validateItems<T>(
 ```
 
 - `off`: every item passes through as `T`; no validation, no logging.
-- `warn`: every item is returned (parsed where it validates, raw otherwise); each divergence is logged at `logger.warn`. Nothing is dropped (R8).
+- `warn`: every item is returned **raw and unparsed** — including items that would validate; the helper runs `DeviceSchema` only to *detect* divergence for logging, never to reshape the returned value. This is deliberate: `warn` is the documented drift workaround, and `z.object` parsing strips unknown keys, so returning parsed valid devices would silently drop fields that today survive. Keeping every item raw preserves the current passthrough contract exactly (R8). Each divergence is logged at `logger.warn`; nothing is dropped.
 - `strict`: only validating items are returned; each divergent item is logged at `logger.error` and appended to `warnings` (R1, R2, R3).
 
 Each rejection `ProblemError` uses `type: "validation-error"` and carries, in `detail`, the offending device's identity (`id`/`uid` where those fields are extractable from the raw object) and the Zod issue path, with the `ZodError` in `raw`.
@@ -129,9 +131,9 @@ Each rejection `ProblemError` uses `type: "validation-error"` and carries, in `d
 
 #### Decision 2: Separate envelope errors from device errors
 
-**Decision:** The page envelope (`pageDetails`, and that `devices` is an array) is validated as a unit; a structural failure there fails the call with `{ ok: false, error: { type: "validation-error" } }` (R5). Only failures *within* individual `devices[]` elements are treated as per-device drift.
+**Decision:** In `strict` and `warn` modes the page envelope (`pageDetails`, and that `devices` is an array) is validated as a unit; a structural failure there fails the call with `{ ok: false, error: { type: "validation-error" } }` (R5). Only failures *within* individual `devices[]` elements are treated as per-device drift. Envelope validation is **mode-gated**: in `off` it does **not** run — `off` means the caller opted out of all validation, so `getAllPages` reads `pageDetails?.nextPageUrl` best-effort off the raw page and returns `devices` untouched, exactly as today. R5's hard-fail guarantee is therefore scoped to `strict`/`warn`, matching the modes that validate at all.
 
-**Rationale:** A malformed envelope is a protocol-level problem — the response is not a devices page, or pagination cannot proceed because `nextPageUrl` is unreadable. That is categorically different from a well-formed page containing one odd device, and salvaging "valid devices" from a response we cannot even parse as a page is meaningless. Failing hard on envelope errors preserves a clear, honest failure signal for genuine protocol breakage while device drift degrades gracefully.
+**Rationale:** A malformed envelope is a protocol-level problem — the response is not a devices page, or pagination cannot proceed because `nextPageUrl` is unreadable. That is categorically different from a well-formed page containing one odd device, and salvaging "valid devices" from a response we cannot even parse as a page is meaningless. Failing hard on envelope errors preserves a clear, honest failure signal for genuine protocol breakage while device drift degrades gracefully. Gating this to `strict`/`warn` keeps `off`'s "no validation, never fails on shape" contract intact (R8): a caller who chose `off` accepted raw passthrough and should not gain a new hard-fail path.
 
 **Alternatives considered:**
 - **Treat every validation failure, envelope included, as a droppable warning.** Rejected: it would mask real protocol breakage (e.g. an auth-error body or an HTML error page shaped nothing like a devices page) as an empty-but-`ok` result, hiding outages instead of reporting them.
@@ -148,7 +150,7 @@ Each rejection `ProblemError` uses `type: "validation-error"` and carries, in `d
 
 #### Decision 4: `getDeviceByUid` stays fail-hard, gains logging
 
-**Decision:** `getDeviceByUid()` in strict mode continues to return `{ ok: false, error: { type: "validation-error" } }` when its single device diverges, and additionally logs the failure at error level through `config.logger` (R7). It adopts the logger-aware `validate()` but no partial-result behavior.
+**Decision:** `getDeviceByUid()` in strict mode continues to return `{ ok: false, error: { type: "validation-error" } }` when its single device diverges, and additionally logs the failure at error level through `config.logger` (R7). It adopts the logger-aware `validate()` but no partial-result behavior. The strict-path `logger.error` is emitted by `getDeviceByUid`'s own `catch` block, **not** by `validate()`: `validate()` deliberately does not log in `strict` (it throws, and the caller decides whether the throw is fatal and how to report it). This avoids double-logging and keeps the single-value seam's strict contract a pure throw. The per-item helper, by contrast, owns its own `logger.error` calls because it does not throw — it partitions and continues.
 
 **Rationale:** Per-device resilience exists to salvage the *other* devices in a batch. A single-device fetch has no other devices to salvage — returning a partial or fabricated device would violate the type contract. Fail-hard is the only correct outcome; the only improvement available is routing its diagnostic through the configured logger for consistency with the batch path.
 
@@ -174,7 +176,7 @@ None. No persisted data, no stored schema, no cache format changes.
 - In `strict` mode, `getAccountDevices()` against a page containing one valid and one divergent device returns `{ ok: true }` with exactly the valid device in `value` and one entry in `warnings[]` (R1, R2).
 - The `warnings[]` entry identifies the divergent device (id/uid) and the failing field path (R2).
 - The divergent device produces one `logger.error` call on the configured logger (R3).
-- A malformed page envelope (e.g. `devices` is not an array) returns `{ ok: false, error: { type: "validation-error" } }` (R5).
+- In `strict`/`warn`, a malformed page envelope (e.g. `devices` is not an array) returns `{ ok: false, error: { type: "validation-error" } }`; in `off` the same response passes through raw without failing (R5, R8).
 - In `warn` mode, a divergent device produces a `logger.warn` call on the configured logger — not on `console` — and the device still appears in the returned data (R6, R8).
 - `getDeviceByUid()` on a divergent device returns `{ ok: false }` and emits one `logger.error` (R7).
 - `Device`, `DeviceSchema`, and every other export retain their current type (R4) — verified by the existing `deviceSchema.test.ts` fixture still validating unchanged.
@@ -192,7 +194,7 @@ New tests cover: mixed valid/invalid page in strict (partial success + warning +
 
 - The public `Device` type, `DeviceSchema`, `DevicesPageSchema`, and all `src/index.ts` exports.
 - `Result` and `ProblemError` type definitions.
-- Pagination behavior (`pageDetails.nextPageUrl` walking) and the extractor pattern.
+- Pagination behavior (`pageDetails.nextPageUrl` walking). The extractor *pattern* remains — one function pulls items from a page — but its return type changes from `T[]` to `unknown[]` (see "Generic `getAllPages` plumbing"); the items are now validated per-element rather than arriving pre-parsed.
 - `warn` and `off` returned-data contracts — every device still flows through.
 - Authentication, rate limiting, retry, and HTTP behavior.
 
