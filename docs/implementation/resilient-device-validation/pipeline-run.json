@@ -69,6 +69,98 @@
       },
       "session_id": "653461fa-be1d-4c88-b765-5f6bc205d9fd",
       "turn": "docs/implementation/resilient-device-validation/review-design/design-auditor-r2.md"
+    },
+    {
+      "t": 1783108395,
+      "kind": "worker",
+      "agent": "design",
+      "label": "design:p1 reviser r2",
+      "ok": true,
+      "started_at": "2026-07-03T19:52:10+00:00",
+      "duration_s": 64.5,
+      "api_duration_s": 58.1,
+      "turns": 11,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.3892,
+      "tokens": {
+        "input": 684,
+        "output": 4225,
+        "cache_read": 132838,
+        "cache_creation": 21378
+      },
+      "session_id": "376f8d8b-5408-4c60-95ca-d29ec626ffa5",
+      "turn": "docs/implementation/resilient-device-validation/review-design/reviser-r2.md"
+    },
+    {
+      "t": 1783108495,
+      "kind": "worker",
+      "agent": "design-auditor",
+      "label": "design:p1 design-auditor r3",
+      "ok": true,
+      "started_at": "2026-07-03T19:53:15+00:00",
+      "duration_s": 100.1,
+      "api_duration_s": 92.1,
+      "turns": 18,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.6009,
+      "tokens": {
+        "input": 751,
+        "output": 6467,
+        "cache_read": 131101,
+        "cache_creation": 36993
+      },
+      "session_id": "53b41ab7-e514-4086-98db-1c690631b034",
+      "turn": "docs/implementation/resilient-device-validation/review-design/design-auditor-r3.md"
+    },
+    {
+      "t": 1783108598,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "design:p2 architect r1",
+      "ok": true,
+      "started_at": "2026-07-03T19:54:55+00:00",
+      "duration_s": 103.6,
+      "api_duration_s": 96.5,
+      "turns": 11,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.4457,
+      "tokens": {
+        "input": 678,
+        "output": 6293,
+        "cache_read": 54773,
+        "cache_creation": 25763
+      },
+      "session_id": "0a01c2fa-9ae0-4152-9c2e-1ab1de36b733",
+      "turn": "docs/implementation/resilient-device-validation/review-design/architect-r1.md"
+    },
+    {
+      "t": 1783108601,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "design:p2 engineer r1",
+      "ok": true,
+      "started_at": "2026-07-03T19:54:55+00:00",
+      "duration_s": 106.2,
+      "api_duration_s": 101.6,
+      "turns": 10,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.4649,
+      "tokens": {
+        "input": 678,
+        "output": 6394,
+        "cache_read": 66158,
+        "cache_creation": 26862
+      },
+      "session_id": "370164f4-5a21-4114-bc55-77cbff57405e",
+      "turn": "docs/implementation/resilient-device-validation/review-design/engineer-r1.md"
     }
   ],
   "invocation": {
