@@ -106,6 +106,48 @@ describe("validateItems", () => {
     expect(warnings[0].detail).toContain("index 0");
   });
 
+  test("strict, invalid item with uid but no id names uid= in detail", () => {
+    const logger = mockLogger();
+    const uidSchema = z.object({ uid: z.string(), name: z.string() });
+    const { warnings } = validateItems(
+      uidSchema,
+      [{ uid: "abc-123", name: 123 }],
+      "strict",
+      "Device",
+      logger,
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].detail).toContain("uid=abc-123");
+  });
+
+  test("call with no logger still works using the default logger", () => {
+    const { valid, warnings } = validateItems(
+      schema,
+      [validItem, invalidItem],
+      "strict",
+      "Device",
+    );
+    expect(valid).toEqual([validItem]);
+    expect(warnings).toHaveLength(1);
+  });
+
+  test("strict/warn, items deliberately not an array returns empty result without throwing", () => {
+    const logger = mockLogger();
+    for (const mode of ["strict", "warn"] as const) {
+      const { valid, warnings } = validateItems(
+        schema,
+        "not an array" as unknown as unknown[],
+        mode,
+        "Device",
+        logger,
+      );
+      expect(valid).toEqual([]);
+      expect(warnings).toEqual([]);
+    }
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
   test("warn, mixed returns all items raw/unmutated (unknown keys survive), no warnings, logs via logger not console", () => {
     const consoleWarnSpy = jest
       .spyOn(console, "warn")
@@ -121,7 +163,7 @@ describe("validateItems", () => {
         logger,
       );
       expect(valid).toEqual([validWithExtraKey, invalidItem]);
-      expect((valid[0] as any).extra).toBe("keepme");
+      expect((valid[0] as Record<string, unknown>).extra).toBe("keepme");
       expect(warnings).toHaveLength(0);
       expect(logger.warn).toHaveBeenCalledTimes(1);
       const [message] = (logger.warn as jest.Mock).mock.calls[0];

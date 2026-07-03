@@ -10,6 +10,20 @@ export type ValidationMode = "strict" | "warn" | "off";
 export const VALIDATION_ERROR_TYPE = "validation-error";
 export const VALIDATION_ERROR_STATUS = 400;
 
+// Shared log-line prefixes so every validation-error/warning site (single-value, per-item,
+// and — in client.ts — the envelope hard-fail) emits one consistent, greppable message shape.
+const VALIDATION_WARN_PREFIX = "Validation warning";
+const VALIDATION_ERROR_PREFIX = "Validation error";
+
+/**
+ * Names the first failing Zod issue's path, or "(root)" when the issue has no path. Single
+ * source of truth for the "which field drifted" convention shared by `validate`'s `warn`
+ * branch, `toProblemError`, and (in Phase 2) the envelope hard-fail in client.ts.
+ */
+export function firstIssuePath(error: ZodError): string {
+  return error.issues[0]?.path?.join(".") || "(root)";
+}
+
 /**
  * Single-value validation seam (used by getDeviceByUid). The trailing `logger` parameter is
  * optional and defaults to `defaultLogger`, so existing 3-arg call sites keep compiling.
@@ -33,8 +47,8 @@ export function validate<T>(
       throw result.error;
     case "warn": {
       // Name the failing path, not the raw multi-line ZodError.message blob (mirrors toProblemError).
-      const path = result.error.issues[0]?.path?.join(".") || "(root)";
-      logger.warn(`Validation warning at path: ${path}`);
+      const path = firstIssuePath(result.error);
+      logger.warn(`${VALIDATION_WARN_PREFIX}: failed at path ${path}`);
       return data as T; // raw passthrough preserved
     }
     default:
@@ -45,7 +59,8 @@ export function validate<T>(
 /**
  * Array validation seam (used by the pagination path). Validates each element of `items`
  * individually and partitions the results by mode. Never throws — a divergent element is
- * either dropped (strict) or kept raw (warn), never fatal to the batch.
+ * either dropped (strict) or kept raw (warn), never fatal to the batch, and a non-array `items`
+ * yields an empty result in every mode rather than a thrown TypeError.
  *
  * `entityLabel` is generic (e.g. "Device") so this helper carries no domain-specific copy and
  * can be reused for a future paginated collection endpoint.
@@ -57,9 +72,14 @@ export function validateItems<T>(
   entityLabel: string,
   logger: LoggerLike = defaultLogger,
 ): { valid: T[]; warnings: ProblemError[] } {
+  // Array.isArray guard, hoisted above the mode switch: a non-array `items` yields an empty
+  // result unconditionally, so "Never throws" holds for strict/warn too, not just off.
+  if (!Array.isArray(items)) {
+    return { valid: [], warnings: [] };
+  }
+
   if (mode === "off") {
-    // Array.isArray guard: a non-array `items` yields [], never a thrown TypeError.
-    return { valid: (Array.isArray(items) ? items : []) as T[], warnings: [] };
+    return { valid: items as T[], warnings: [] };
   }
 
   const valid: T[] = [];
@@ -75,10 +95,10 @@ export function validateItems<T>(
     // line and the warnings[] entry, so they describe the same failure.
     const problem = toProblemError(entityLabel, result.error, item, index);
     if (mode === "warn") {
-      logger.warn(`Validation warning: ${problem.detail}`);
+      logger.warn(`${VALIDATION_WARN_PREFIX}: ${problem.detail}`);
       valid.push(item as T); // nothing dropped in warn
     } else {
-      logger.error(`Validation error: ${problem.detail}`);
+      logger.error(`${VALIDATION_ERROR_PREFIX}: ${problem.detail}`);
       warnings.push(problem);
     }
   });
@@ -89,15 +109,21 @@ export function validateItems<T>(
  * Builds the single `validation-error` ProblemError shape shared by validateItems' rejections
  * and getDeviceByUid's catch. Exported for that reuse; validation.ts is not part of the
  * src/index.ts barrel, so this stays off the public surface.
+ *
+ * `identityOverride`, when supplied, is used verbatim in place of `extractIdentity(item)` —
+ * lets a single-value caller (e.g. getDeviceByUid) name the identity it already knows from its
+ * own argument, rather than relying on the array-centric `item`/`index` fallback.
  */
 export function toProblemError(
   entityLabel: string,
   error: ZodError,
   item: unknown,
   index: number,
+  identityOverride?: string,
 ): ProblemError {
-  const identity = extractIdentity(item) ?? `index ${index}`;
-  const path = error.issues[0]?.path?.join(".") || "(root)";
+  const identity =
+    identityOverride ?? extractIdentity(item) ?? `index ${index}`;
+  const path = firstIssuePath(error);
   return {
     type: VALIDATION_ERROR_TYPE,
     title: `${entityLabel} failed schema validation`,
@@ -107,6 +133,13 @@ export function toProblemError(
   };
 }
 
+/**
+ * Best-effort identity extraction, limited to the `id`/`uid` field conventions: `id` (number or
+ * string) is preferred, then `uid` (string). An entity keyed by any other field is not
+ * recognized here and falls back to the caller's `index N` in `toProblemError`. A caller with a
+ * differently-keyed entity should pass `identityOverride` to `toProblemError` instead of relying
+ * on this function to discover its key.
+ */
 function extractIdentity(item: unknown): string | undefined {
   if (item && typeof item === "object") {
     const rec = item as Record<string, unknown>;

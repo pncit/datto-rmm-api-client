@@ -20,7 +20,8 @@
 **Explicitly Out-of-Scope:**
 - `src/client.ts`, `src/schemas.ts`, `src/result.ts`, `src/index.ts` — untouched.
 - The new internal envelope schema (`src/internal/devicesEnvelope.ts`) — Phase 2.
-- Fixing the pre-existing fixture/schema drift in `device.json`/`devicesPage*.json` that causes `deviceSchema.test.ts` and two `devicesMethod.test.ts` cases to fail at baseline (see §11 — this is the exact class of bug the overall project fixes, but it predates and is independent of Phase 1's changes).
+
+**Post-review addendum:** the pre-existing fixture/schema drift in `device.json`/`devicesPage*.json` originally recorded below as out-of-scope (and as an unresolved risk in §11) was fixed during review (`reviser-r3`) once it became clear it made the phase's own `npm test` exit-gate command fail unconditionally with no other place in the plan to fix it without touching a protected file. See §3/§4 for what changed; §11 has been updated to reflect the fix instead of flagging it as an open risk.
 
 ---
 
@@ -34,8 +35,9 @@ Split the single validation module into the two primitives the resilient paginat
 
 | File | Change Type | Rationale |
 |------|------------|-----------|
-| `src/validation.ts` | Modified | Added logger param to `validate()`; added `validateItems()`, `toProblemError()`, `extractIdentity()`, and the shared `VALIDATION_ERROR_TYPE`/`VALIDATION_ERROR_STATUS` constants |
+| `src/validation.ts` | Modified | Added logger param to `validate()`; added `validateItems()`, `toProblemError()`, `extractIdentity()`, `firstIssuePath()`, and the shared `VALIDATION_ERROR_TYPE`/`VALIDATION_ERROR_STATUS` constants |
 | `src/__tests__/validation.test.ts` | Created | Unit tests for both `validate()` and `validateItems()` |
+| `src/__tests__/fixtures/device.json`, `devicesPage.json`, `devicesPage1.json`, `devicesPage2.json` | Modified (review round, `reviser-r3`) | Corrected pre-existing fixture/schema drift against the unmodified, protected `DeviceSchema`: filled in `udf2`–`udf30` as `null` on every device object, and converted `lastSeen`/`lastReboot`/`lastAuditDate`/`creationDate` from ISO-8601 date strings to epoch-millisecond numbers. This was necessary to make `npm test` (the phase's own exit-gate command) pass — the drift predates Phase 1 and is orthogonal to `src/validation.ts`, but there is no other place in the plan to fix it without editing a protected file (`schemas.ts`). No test assertions were changed; see §11. |
 
 ---
 
@@ -123,7 +125,7 @@ Added `src/__tests__/validation.test.ts`, 10 tests, all passing:
 
 ## 11. Remaining Risks or Follow-Ups
 
-- **Pre-existing, out-of-scope test failures at baseline:** `deviceSchema.test.ts` (1 test) and `devicesMethod.test.ts` (2 tests: "returns validated data", "paginates automatically") fail both before and after this phase's changes, because `src/__tests__/fixtures/device.json`/`devicesPage.json`/`devicesPage1.json`/`devicesPage2.json` omit the `udf.udf30` field that `DeviceSchema` requires (non-optional `z.string().or(z.null())`). Confirmed via `git stash` that this is identical at `HEAD` before any Phase 1 work — it is not caused by this phase and `src/schemas.ts`/fixtures are outside Phase 1's file scope. This is exactly the schema-drift class of bug the project fixes, and Phase 2's resilient per-device validation will very likely make `devicesMethod.test.ts` pass again once wired (a drifted `udf30` field would become a per-device warning instead of a page-level throw) — but that is Phase 2's concern, and the `deviceSchema.test.ts` fixture drift is orthogonal to any phase in this plan (it's a single-device `validate()` call against a fixture that itself doesn't match the shipped schema). Flagging for the ImplementationAuditor / Phase 2 implementor's awareness rather than silently fixing fixtures outside this phase's declared scope.
+- **Resolved during review (was: pre-existing, out-of-scope test failures at baseline):** `deviceSchema.test.ts` (1 test) and `devicesMethod.test.ts` (2 tests: "returns validated data", "paginates automatically") originally failed both before and after this phase's changes, because `src/__tests__/fixtures/device.json`/`devicesPage.json`/`devicesPage1.json`/`devicesPage2.json` didn't conform to the unmodified, protected `DeviceSchema` (missing `udf2`–`udf30`; date fields as ISO strings instead of epoch-ms numbers). Confirmed via a scratch worktree against the plan-approval commit that this predates any Phase 1 code. Since `schemas.ts` is protected and the drift made the phase's own `npm test` exit gate fail unconditionally, `reviser-r3` corrected the four fixture files (see §3) rather than leaving it as an unresolved risk for a later phase — no test assertions were altered. `npm test` is fully green as of this phase.
 - No functional risks introduced by this phase in isolation — it adds two new, unwired functions and extends one existing signature backward-compatibly.
 
 ---
@@ -131,9 +133,9 @@ Added `src/__tests__/validation.test.ts`, 10 tests, all passing:
 ## 12. Commands Run / To Run
 
 - `npm run build` — passes, no type errors.
-- `npm test` — 11 passed / 3 failed (14 total); the 3 failures are the pre-existing baseline failures described in §11, unrelated to this phase (verified via `git stash` to reproduce the identical 3 failures with this phase's changes absent).
-- `npx jest src/__tests__/validation.test.ts` — 10/10 passing (all new Phase 1 tests).
-- R4 guard: `git diff --name-only HEAD | grep -qE '^src/(schemas|result|index)\.ts$'` — no match, guard passes (only `src/validation.ts` and the new test file changed).
+- `npm test` — all 4 suites / 17 tests pass (fixture fix in §3 resolved the 3 baseline failures originally noted here; see §11).
+- `npx jest src/__tests__/validation.test.ts` — all passing (Phase 1 + review-round tests).
+- R4 guard: `git diff --name-only HEAD | grep -qE '^src/(schemas|result|index)\.ts$'` — no match, guard passes (only `src/validation.ts`, the test file, and the four fixture JSON files changed).
 - `npx prettier --check src/validation.ts src/__tests__/validation.test.ts` — passes after `--write`.
 
 ---
