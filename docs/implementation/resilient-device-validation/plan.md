@@ -156,8 +156,10 @@ function extractIdentity(item: unknown): string | undefined {
 ```bash
 npm run build
 npm test
+# R4 guard (mechanically enforced): none of the protected files may change in this phase.
+git diff --name-only | grep -qE '^src/(schemas|result|index)\.ts$' && { echo 'R4 violation: a protected file (schemas.ts/result.ts/index.ts) changed'; exit 1; } || true
 ```
-- No changes to `src/schemas.ts`, `src/result.ts`, or `src/index.ts` in this phase (verify via `git diff --name-only`).
+- The `git diff` guard above exits non-zero if `src/schemas.ts`, `src/result.ts`, or `src/index.ts` is modified in this phase (all Phase 1 work is confined to `src/validation.ts` + the new test file).
 - `deviceSchema.test.ts` still passes unmodified (proves the 3-arg `validate` call and `DeviceSchema` are unchanged — R4).
 
 ---
@@ -179,9 +181,9 @@ Rewire `getAllPages` to validate the page **envelope** structurally (via a direc
 3. **Update `getAccountDevices`** to call the new `getAllPages`.
    - Files: `src/client.ts`
    - Notes: `getAllPages<Device, DevicesEnvelope>(url, token, params, DevicesEnvelopeSchema, DeviceSchema, (p) => p.devices ?? [])`. Return type stays `Result<Device[]>`.
-4. **Update `getDeviceByUid`** to pass the logger to `validate` and log at error level on a `ZodError` in its `catch`.
+4. **Update `getDeviceByUid`** to declare a `logger` local, pass it to `validate`, and log at error level on a `ZodError` in its `catch`.
    - Files: `src/client.ts`
-   - Notes: `validate(DeviceSchema, res.value, this.validationMode, logger)`; in the `catch`, when `e instanceof ZodError`, call `logger.error(...)` **before** returning `{ ok: false, error: { type: "validation-error", ... } }` (R7). Keep the `unknown-error` branch. `validate` itself still does not log in strict, so this is the single error log (no double-logging).
+   - Notes: **First**, resolve `const logger = this.config.logger ?? defaultLogger;` at the top of `getDeviceByUid` (mirroring the Step 2 line in `getAllPages`) — the current method has no `logger` in scope, so without this both the `validate(...)` call and the `catch` `logger.error(...)` fail to compile (`Cannot find name 'logger'`) and Phase 2's own exit gate cannot pass. Then call `validate(DeviceSchema, res.value, this.validationMode, logger)`; in the `catch`, when `e instanceof ZodError`, call `logger.error(...)` **before** returning `{ ok: false, error: { type: "validation-error", ... } }` (R7). Keep the `unknown-error` branch. `validate` itself still does not log in strict, so this is the single error log (no double-logging).
 5. **Clean up imports** in `client.ts`.
    - Files: `src/client.ts`
    - Notes: Add `validateItems` and keep `validate`; add `z` + `PaginationDataSchema`; drop now-unused `DevicesPageSchema`/`DevicesPage` imports if unreferenced (they remain defined/exported in `schemas.ts`). Ensure `defaultLogger` and `ProblemError` are imported.
@@ -262,7 +264,10 @@ async getAccountDevices(params?: Record<string, any>): Promise<Result<Device[]>>
   );
 }
 
-// getDeviceByUid catch (strict path logs error; validate() does not):
+// getDeviceByUid: declare a logger local at the top of the method (none exists today),
+// then reuse it in the validate() call and the catch. Without this, `logger` is undefined.
+const logger = this.config.logger ?? defaultLogger;
+// ... validate(DeviceSchema, res.value, this.validationMode, logger) inside the try ...
 } catch (e) {
   if (e instanceof ZodError) {
     logger.error(`Device validation failed for ${deviceUid}: ${e.message}`);
@@ -283,15 +288,21 @@ async getAccountDevices(params?: Record<string, any>): Promise<Result<Device[]>>
 - **`getDeviceByUid` fail-hard + log (R7):** strict, divergent single device → `{ ok: false, error: { type: "validation-error" } }` and `logger.error` called once.
 
 ### Documentation (if needed)
-- Files: `README.md` (and/or add a short "Resilient validation / Breaking behavioral changes" note).
-- Add release-note bullets for the three behavioral changes from the design's Breaking Changes: (1) `strict` now returns `{ ok: true }` + `warnings[]` for drifted accounts instead of `{ ok: false }`; (2) `warn` now hard-fails on a malformed **envelope** (`off` unaffected); (3) `warn` drift diagnostics now route to `config.logger` and are emitted **one per divergent device** (finer-grained) rather than one `console.warn` per page.
+- Files: `README.md`.
+- Add a new top-level section titled exactly `## Resilient validation` (append it after the existing content; place a `### Behavioral changes` subsection under it for the bullets). Using this exact heading is what the Phase 2 exit-gate `grep` guard verifies, so the target is unambiguous.
+- Under that section, add release-note bullets for the three behavioral changes from the design's Breaking Changes: (1) `strict` now returns `{ ok: true }` + `warnings[]` for drifted accounts instead of `{ ok: false }`; (2) `warn` now hard-fails on a malformed **envelope** (`off` unaffected); (3) `warn` drift diagnostics now route to `config.logger` and are emitted **one per divergent device** (finer-grained) rather than one `console.warn` per page.
 
 ### Exit Gate
 ```bash
 npm run build
 npm test
+# R4 guard (mechanically enforced): schemas.ts/result.ts/index.ts must not change — the envelope schema stays internal to client.ts.
+git diff --name-only | grep -qE '^src/(schemas|result|index)\.ts$' && { echo 'R4 violation: a protected file (schemas.ts/result.ts/index.ts) changed'; exit 1; } || true
+# Doc-landing guard: the release-note section added in the Documentation step must exist.
+grep -q '## Resilient validation' README.md || { echo 'Documentation not landed: missing "## Resilient validation" section in README.md'; exit 1; }
 ```
-- `git diff --name-only` shows no changes to `src/schemas.ts` `DeviceSchema`/`PaginationDataSchema`/`DevicesPageSchema` shapes, `src/result.ts`, or the `src/index.ts` export list (envelope schema stays internal — R4).
+- The `git diff` guard exits non-zero if `src/schemas.ts`, `src/result.ts`, or `src/index.ts` is modified — mechanically enforcing that all Phase 2 work is confined to `src/client.ts` (+ the test file) and that the internal envelope schema is never exported (R4).
+- The `grep` guard confirms the README release-note section landed.
 - All pre-existing tests (`deviceSchema.test.ts`, `client.test.ts`, and the original two `devicesMethod.test.ts` cases) pass unmodified.
 
 ---
