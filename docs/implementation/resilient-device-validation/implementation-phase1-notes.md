@@ -61,7 +61,16 @@ All four new/changed exports (`validate`, `validateItems`, `toProblemError`, `VA
 
 ## 5. Deviations From Plan (If Any)
 
-No deviations. Implementation follows the plan's Opinionated Implementation Notes for Phase 1 closely; the only difference from the plan's illustrative snippet is cosmetic (wrapping the `warn` case in `validate()` in a block `{ }` to scope the local `path` const — required because the plan's snippet computes `path` inline in the template string, which is equivalent but I extracted it to a named `const` for readability/consistency with the `validateItems` per-item path computation). This is a stylistic, non-behavioral choice, not a deviation from intent.
+The initial implementation had only the cosmetic difference noted below. Since then, review round 2 (`reviser-r4`) made four further, behavior-preserving structural additions beyond the plan's illustrative snippet, each addressing a specific reviewer finding:
+
+- **Extracted `firstIssuePath(error: ZodError): string`** as a single exported helper (`architect-r1-f1`, `engineer-r1-f2`), replacing the previously-duplicated inline `result.error.issues[0]?.path?.join(".") || "(root)"` computation in `validate()`'s `warn` branch and in `toProblemError()`. The plan's snippet inlines this computation at both sites and again (a third time) in Phase 2's envelope hard-fail; centralizing it now gives Phase 2 a helper to import instead of a third hand-copy.
+- **Added an optional trailing `identityOverride?: string` parameter to `toProblemError`** (`architect-r1-f3`, ratified `architect-r2`), widening the plan's exact `toProblemError(entityLabel, error, item, index)` signature so a future single-value caller can inject an identity it already knows instead of falling back to `index N`. This parameter is **not exercised by any call site in this phase**, and the plan's own Phase 2 `getDeviceByUid` call site (Opinionated Implementation Notes) calls `toProblemError("Device", e, res.value, 0)` with exactly 4 arguments — it does not use the 5th argument either. It is kept as additive, optional, unused surface: it doesn't affect the plan-specified call site or any existing behavior, and the architect (round 2) ratified it as closing a genuine array-vs-single-value reuse gap in the builder. Flagged here per `project-lead-r2-f2` so a future reader knows Phase 2 is not required to pass it — Design Decision 4 already accepts the id-first `extractIdentity` result as sufficient for `getDeviceByUid`.
+- **Added `VALIDATION_WARN_PREFIX`/`VALIDATION_ERROR_PREFIX` shared constants** (`engineer-r1-f3`), replacing three separately-hand-written log-line prefixes (`validate()`'s `warn`, `validateItems()`'s `warn` and `strict`) with one greppable pair.
+- **Hoisted the `Array.isArray(items)` guard in `validateItems`** above the `mode === "off"` branch (`engineer-r1-f1`), so a non-array `items` returns `{ valid: [], warnings: [] }` unconditionally in `strict`/`warn` too, not only `off` — making the JSDoc's "never throws" claim unconditionally true rather than off-mode-only.
+
+None of these changes alter the signatures or semantics the plan requires for Phase 2 to build on (`validate`, `validateItems`, `toProblemError`'s original 4-arg form, the two error-literal constants); they are refinements layered on top, driven by review, not a deviation from Phase 1's intent.
+
+The original cosmetic difference: wrapping the `warn` case in `validate()` in a block `{ }` to scope the local `path` const — required because the plan's snippet computes `path` inline in the template string, which is equivalent but was extracted to a named `const` for readability/consistency with the `validateItems` per-item path computation (this `const` is now `firstIssuePath(result.error)`, per the extraction above). This remains a stylistic, non-behavioral choice.
 
 ---
 
@@ -75,7 +84,7 @@ One discovery worth recording (not an ambiguity in this phase's scope, but relev
 
 ## 7. Tests
 
-Added `src/__tests__/validation.test.ts`, 10 tests, all passing:
+Added `src/__tests__/validation.test.ts`, now 13 tests, all passing (10 from the initial implementation + 3 added in review round 2 / `reviser-r4`, listed below):
 
 **`validate()` (5 tests):**
 - `strict` on valid data returns the parsed value, no logger calls.
@@ -84,12 +93,15 @@ Added `src/__tests__/validation.test.ts`, 10 tests, all passing:
 - `off` returns raw data, no logger calls.
 - The pre-existing 3-arg call form (no logger) still compiles and works, using the default logger.
 
-**`validateItems()` (5 tests), all passing `entityLabel: "Device"`:**
+**`validateItems()` (8 tests), all passing `entityLabel: "Device"`:**
 - `strict`, mixed `[valid, invalid]` → `valid` contains only the parsed valid item; `warnings` has one entry with `type: "validation-error"`, `title: "Device failed schema validation"`, a `detail` naming `id=2` and the failing path (`"name"`), and `raw` populated; `logger.error` called once with a message containing that same `detail`; `logger.warn` never called.
 - `strict`, invalid item missing both `id` and `uid` → `detail` falls back to `index 0`.
+- `strict`, invalid item with `uid` but no `id` → `detail` names `uid=abc-123` (added `reviser-r4`, closes `engineer-r1-f4`: pins the previously-untested `extractIdentity` uid branch).
 - `warn`, mixed → all items returned raw/unmutated (asserted via an unknown extra key surviving on the valid item, proving no re-parse); `warnings` empty; `logger.warn` called once with the identity + path message; `logger.error` never called.
 - `off`, mixed → all items returned as-is, `warnings` empty, no logger calls.
 - `off`, `items` deliberately not an array → returns `{ valid: [], warnings: [] }` without throwing.
+- `strict`/`warn`, `items` deliberately not an array (both modes, one test) → returns `{ valid: [], warnings: [] }` without throwing, no logger calls (added `reviser-r4`, closes `engineer-r1-f1`: pins the guard now hoisted above the mode switch so "never throws" holds for `strict`/`warn`, not just `off`).
+- Call with no trailing `logger` argument → resolves via the `defaultLogger` default without throwing (added `reviser-r4`, closes `engineer-r1-f4`: mirrors the existing no-logger `validate()` test, closing the asymmetric coverage gap).
 
 ---
 
@@ -133,9 +145,9 @@ Added `src/__tests__/validation.test.ts`, 10 tests, all passing:
 ## 12. Commands Run / To Run
 
 - `npm run build` — passes, no type errors.
-- `npm test` — all 4 suites / 17 tests pass (fixture fix in §3 resolved the 3 baseline failures originally noted here; see §11).
-- `npx jest src/__tests__/validation.test.ts` — all passing (Phase 1 + review-round tests).
-- R4 guard: `git diff --name-only HEAD | grep -qE '^src/(schemas|result|index)\.ts$'` — no match, guard passes (only `src/validation.ts`, the test file, and the four fixture JSON files changed).
+- `npm test` — all 4 suites / 17 tests pass: `deviceSchema.test.ts` (1), `devicesMethod.test.ts` (2), `client.test.ts` (1), `validation.test.ts` (13, per §7 — 10 from the initial implementation + 3 added in review round 2) = 17 (fixture fix in §3 resolved the 3 baseline failures originally noted here; see §11).
+- `npx jest src/__tests__/validation.test.ts` — all 13 passing (Phase 1 + review-round tests).
+- R4 guard: `git diff --name-only HEAD | grep -qE '^src/(schemas|result|index)\.ts$'` — no match, guard passes (only `src/validation.ts`, the test file, the four fixture JSON files, and this notes file changed across all rounds).
 - `npx prettier --check src/validation.ts src/__tests__/validation.test.ts` — passes after `--write`.
 
 ---
