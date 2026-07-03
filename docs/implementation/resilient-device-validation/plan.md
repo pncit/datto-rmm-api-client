@@ -7,7 +7,7 @@
 - **Assumptions:**
   - The repo has **no** `lint`/`typecheck` npm scripts; the authoritative unattended verification is `npm run build` (tsc, library code) + `npm test` (jest/ts-jest, includes test type-checking). Exit gates use exactly these.
   - The `warnings[]` channel on `Result<T>`'s `ok: true` branch and the `ProblemError` shape are sufficient to carry rejected devices — no `result.ts` change is required (matches design).
-  - The internal envelope schema must **not** be exported from `src/index.ts`; defining it as a non-`export` const inside `src/client.ts` keeps it off the public surface (the barrel re-exports only `export`ed members), satisfying R4.
+  - The internal envelope schema must **not** be reachable from `src/index.ts`. `src/index.ts` barrels exactly four modules (`export *` of `./client.js`, `./config.js`, `./result.js`, `./schemas.js`) — so **anything exported from `client.ts` becomes public**. The envelope schema therefore lives in a dedicated **un-barrelled** module `src/internal/devicesEnvelope.ts` (a sibling of the already-non-barrelled `validation.ts`), which both `client.ts` and the Phase 2 test import. This keeps the schema off the public surface *and* lets the fixture-acceptance test reference the real schema (not a copy), satisfying R4. `src/index.ts` must not add an `export * from "./internal/..."`.
   - Test payloads can be built by cloning the existing `device.json` fixture and mutating it (e.g. an out-of-enum `deviceClass`) rather than adding many new fixture files; this keeps fixtures maintainable and is consistent with the existing fixture-driven tests.
 - **Quality Bar:** Extensibility and best practices prioritized. Backwards compatibility not prioritized unless explicitly stated. (The design *does* explicitly require preserving the public type surface and the `warn`/`off` returned-data contracts — those are honored as stated requirements, not general back-compat.)
 
@@ -33,11 +33,14 @@
 - Implement **one phase at a time**; run the phase exit gate before moving on.
 - Verification commands for this repo are `npm run build` and `npm test`. There is **no** `npm run lint` or `npm run typecheck` — do not invent them.
 - **Do not** modify `src/schemas.ts` `DeviceSchema` / `PaginationDataSchema` / `DevicesPageSchema` shapes, or `src/result.ts`, or any exported type. `DevicesPageSchema` stays exported and unchanged even though the pagination path stops using it.
-- **Do not** export the new internal envelope schema from `src/index.ts` — keep it a non-`export` const in `src/client.ts`.
+- **Do not** make the new internal envelope schema reachable from `src/index.ts`. Put it in a new un-barrelled module `src/internal/devicesEnvelope.ts` (do **not** add `src/internal` to the `src/index.ts` barrel); `client.ts` and the Phase 2 test both import it from there.
+- **Resolve the logger once.** Add a `private logger: LoggerLike = config.logger ?? defaultLogger` field on the client in the constructor (reusing the value already computed for `HttpClient`) and reference `this.logger` in `getAllPages`/`getDeviceByUid` — do **not** re-derive `config.logger ?? defaultLogger` per method. Requires importing `LoggerLike` in `client.ts`.
 - Preserve the `warn` and `off` **returned-data** contracts exactly: in `warn`, every device (valid or not) is returned **raw and unparsed** (never re-parsed, which would strip unknown keys); in `off`, nothing is validated or logged. The only behavioral break allowed is the envelope hard-fail in `warn` (design Decision 2 / Breaking Change #2).
 - `validate()`'s new `logger` parameter is an **optional trailing** parameter defaulting to `defaultLogger`, so existing 3-arg calls (e.g. in `deviceSchema.test.ts`) keep compiling untouched.
 - `validate()` must **not** log in `strict` mode — it throws, and the caller (`getDeviceByUid`) decides fatality and emits the error log. The per-item helper, which does not throw, owns its own error/warn logging.
 - **One error shape, one message.** Every `type: "validation-error"` `ProblemError` (per-device rejections, the `getDeviceByUid` catch, and the envelope hard-fail) uses a **short stable `title`**, specifics in `detail`, and the `ZodError` in `raw` — never the serialized `ZodError.message` in `title`. The per-device and `getDeviceByUid` sites share the exported `toProblemError(entityLabel, …)` builder; the envelope site follows the same convention with title `"Malformed devices page envelope"`. Log lines interpolate the corresponding `detail` (which names the device/field), not the bare `ZodError.message`, so logs and `warnings[]` describe the same failure.
+- **Single source of truth for the error `type`/`status`.** The literals `type: "validation-error"` and `status: 400` are exported once from `validation.ts` as `VALIDATION_ERROR_TYPE`/`VALIDATION_ERROR_STATUS` and consumed by **both** `toProblemError` and the envelope hard-fail branch (which can't call `toProblemError` because its `title` differs). Do not hand-write those two literals a second time in `client.ts`. (Tests may still assert the literal `"validation-error"` string.)
+- **`validate()`'s `warn` log names the failing path, not a raw `ZodError` dump.** The single-value seam is generic (no `entityLabel`), so it cannot name the device, but it **must not** log the multi-line `result.error.message` blob. It logs the first Zod issue path (`result.error.issues[0]?.path?.join(".") || "(root)"`), mirroring `toProblemError`, so the sole `warn`-mode `getDeviceByUid` caller gets a structured "which field drifted" line consistent with the strict path (whose `getDeviceByUid` caller already names the uid from context).
 - `validateItems`/`toProblemError` are **generic** and take an `entityLabel` (`"Device"` today) rather than hardcoding device copy, so the design's stated reuse for a future paginated collection endpoint is not blocked. `toProblemError` is exported from `validation.ts`, which is **not** in the `src/index.ts` barrel, so it stays off the public surface.
 
 ---
@@ -52,7 +55,8 @@ Turn the single validation module into the two primitives the resilient paginati
 ### Steps
 1. **Add a logger-aware `validate()` overload-compatible signature**: give `validate` an optional trailing `logger: LoggerLike = defaultLogger` and route the `warn` diagnostic through `logger.warn`. Leave `strict` (throw, no log) and `off` (raw passthrough) semantics exactly as they are.
    - Files: `src/validation.ts`
-   - Notes: Import `defaultLogger` and `LoggerLike` from `./logger.js`. The default keeps `deviceSchema.test.ts`'s 3-arg call compiling. Do **not** log in `strict`.
+   - Notes: Import `defaultLogger` and `LoggerLike` from `./logger.js`. The default keeps `deviceSchema.test.ts`'s 3-arg call compiling. Do **not** log in `strict`. The `warn` log must name the **failing path** (`result.error.issues[0]?.path?.join(".") || "(root)"`) — **not** the raw `result.error.message` blob — so the single-value seam's `warn` diagnostic is as structured as the strict/array paths.
+   - Also add the shared error-literal constants here: `export const VALIDATION_ERROR_TYPE = "validation-error"` and `export const VALIDATION_ERROR_STATUS = 400`, reused by `toProblemError` (this file) and the envelope hard-fail (`client.ts`).
 2. **Add the `validateItems()` per-item helper**: validate each element of `unknown[]` against a `ZodType<T>`, partitioning by mode into `{ valid: T[]; warnings: ProblemError[] }`. The helper is **generic** — it takes an `entityLabel: string` (the caller passes `"Device"`) so no domain copy is hardcoded and it can be reused for a future paginated collection endpoint (design Future Considerations) without emitting "Device …" for non-devices.
    - Files: `src/validation.ts`
    - Notes: Signature `validateItems<T>(schema, items, mode, entityLabel, logger = defaultLogger)`. `off` → all items pass through as `T` (guarded by `Array.isArray` — a non-array `items` yields `[]`, never a thrown `TypeError`), no logging, no warnings. `warn` → every item returned **raw** (both would-validate and divergent), each divergence logged via `logger.warn`, nothing dropped, no warnings pushed. `strict` → only valid items returned (parsed), each divergent item logged via `logger.error` and pushed to `warnings`. In **both** `warn` and `strict`, build the per-item `ProblemError` **once** via `toProblemError` and interpolate its `detail` (identity + failing path) into the log line — the log and the `warnings[]` entry must name the same device and field, not the bare `ZodError.message`.
@@ -69,6 +73,11 @@ import { ProblemError } from "./result.js";
 
 export type ValidationMode = "strict" | "warn" | "off";
 
+// Single source of truth for the validation-error ProblemError type/status; reused by the envelope
+// hard-fail in client.ts (which can't call toProblemError because its title differs).
+export const VALIDATION_ERROR_TYPE = "validation-error";
+export const VALIDATION_ERROR_STATUS = 400;
+
 // Single-value seam (used by getDeviceByUid). Optional trailing logger keeps 3-arg calls compiling.
 export function validate<T>(
   schema: ZodType<T>,
@@ -83,7 +92,8 @@ export function validate<T>(
     case "strict":
       throw result.error;               // caller decides fatality + logging; validate() does NOT log here
     case "warn":
-      logger.warn(`Validation warning: ${result.error.message}`);
+      // Name the failing path, not the raw multi-line ZodError.message blob (mirrors toProblemError).
+      logger.warn(`Validation warning at path: ${result.error.issues[0]?.path?.join(".") || "(root)"}`);
       return data as T;                 // raw passthrough preserved
     default:
       throw new Error(`Unknown validation mode: ${mode}`);
@@ -134,9 +144,9 @@ export function toProblemError(
   const identity = extractIdentity(item) ?? `index ${index}`;
   const path = error.issues[0]?.path?.join(".") || "(root)";
   return {
-    type: "validation-error",
+    type: VALIDATION_ERROR_TYPE,
     title: `${entityLabel} failed schema validation`,   // short stable title; specifics go in detail, full error in raw
-    status: 400,
+    status: VALIDATION_ERROR_STATUS,
     detail: `${entityLabel} ${identity} failed validation at path: ${path}`,
     raw: error,
   };
@@ -155,7 +165,7 @@ function extractIdentity(item: unknown): string | undefined {
 ### Tests (in this phase)
 - Add `src/__tests__/validation.test.ts`.
 - Build a minimal schema inline (e.g. `z.object({ id: z.number(), name: z.string() })`) and a capturing mock logger `{ debug/info/warn/error: jest.fn() }`.
-- `validate()` cases: `strict` on valid returns parsed value; `strict` on invalid **throws a `ZodError`** and does **not** call any logger method; `warn` on invalid returns the raw value and calls `logger.warn` (not `console`); `off` returns raw with no logger calls; 3-arg call (no logger) still works (uses default).
+- `validate()` cases: `strict` on valid returns parsed value; `strict` on invalid **throws a `ZodError`** and does **not** call any logger method; `warn` on invalid returns the raw value and calls `logger.warn` **with a message naming the failing path** (assert the log contains the path segment, e.g. `"name"`, and does **not** contain the raw multi-line `ZodError.message` blob) — via `logger.warn`, not `console`; `off` returns raw with no logger calls; 3-arg call (no logger) still works (uses default).
 - `validateItems()` cases (pass `entityLabel: "Device"`):
   - `strict`, mixed `[valid, invalid]` → `valid` contains exactly the parsed valid item; `warnings` has one entry with `type: "validation-error"`, a short `title` (`"Device failed schema validation"`), a `detail` naming the item (`id=`/`uid=`) and the failing path, and a `ZodError` in `raw`; `logger.error` called once **with a message containing that same `detail` string** (assert the log names the device + field, not the bare `ZodError.message`), `logger.warn` never.
   - `strict`, invalid item **missing id and uid** → `detail` falls back to `index N`.
@@ -187,36 +197,54 @@ Rewire `getAllPages` to validate the page **envelope** structurally (via a direc
 **Requirements:** R1, R2, R3, R4, R5, R7, R8
 
 ### Steps
-1. **Define the internal envelope schema** (non-exported) in `client.ts`.
+1. **Resolve the logger once on the client.** Add a `private logger: LoggerLike = config.logger ?? defaultLogger` field, set in the constructor (reuse the value already passed to `HttpClient`), so `getAllPages`/`getDeviceByUid` reference `this.logger` instead of re-deriving it.
    - Files: `src/client.ts`
-   - Notes: `const DevicesEnvelopeSchema = z.object({ pageDetails: PaginationDataSchema.optional(), devices: z.array(z.unknown()).optional() })` and `type DevicesEnvelope = z.infer<typeof DevicesEnvelopeSchema>`. Import `z` and `PaginationDataSchema` from `./schemas.js`. Must **not** be `export`ed. `DevicesPageSchema` stays exported/unchanged in `schemas.ts`.
-2. **Rewrite `getAllPages`** to the new signature `getAllPages<T, P>(url, token, params, envelopeSchema, itemSchema, extractor: (page: P) => unknown[])`.
+   - Notes: Import `LoggerLike` and `defaultLogger` from `./logger.js`. No Phase 2 method re-computes `config.logger ?? defaultLogger`; all read `this.logger`.
+2. **Define the internal envelope schema** in a new **un-barrelled** module `src/internal/devicesEnvelope.ts` (so it stays off the public surface *and* is importable by the Phase 2 test).
+   - Files: `src/internal/devicesEnvelope.ts` (new)
+   - Notes: `export const DevicesEnvelopeSchema = z.object({ pageDetails: PaginationDataSchema.optional(), devices: z.array(z.unknown()).optional() })` and `export type DevicesEnvelope = z.infer<typeof DevicesEnvelopeSchema>`. Import `z` from `zod/v4` and `PaginationDataSchema` from `../schemas.js`. It is exported from *this module*, but the module is **not** added to the `src/index.ts` barrel (which only `export *`s `client/config/result/schemas`), so it never becomes public — mirroring how `validateItems`/`toProblemError` stay non-public in the un-barrelled `validation.ts`. `client.ts` and the Phase 2 test both import `DevicesEnvelopeSchema` from `./internal/devicesEnvelope.js`. `DevicesPageSchema` stays exported/unchanged in `schemas.ts`. Do **not** add `export * from "./internal/..."` to `src/index.ts`.
+3. **Rewrite `getAllPages`** to the new signature `getAllPages<T, P>(url, token, params, envelopeSchema, itemSchema, extractor: (page: P) => unknown[])`.
    - Files: `src/client.ts`
-   - Notes: Resolve `const logger = this.config.logger ?? defaultLogger` once. Per page: in `off`, treat `res.value as P` and read `pageDetails?.nextPageUrl` best-effort (no envelope check, no logging); in `strict`/`warn`, `envelopeSchema.safeParse(res.value)` directly — **not** `validate()`. On envelope failure, first `logger.error(...)` (naming the page URL and the parse error — this is the loudest, protocol-level failure and must be observable through the same logger as per-device drift; in `warn` it also replaces the old page-level `console.warn`), then return `{ ok: false, error: { type: "validation-error", title: "Malformed devices page envelope", status: 400, detail: parsed.error.message, raw: parsed.error } }` (R5) — a **short stable** `title` with the serialized error in `detail`, mirroring `toProblemError`'s convention (do **not** dump `parsed.error.message` into `title`). Then `validateItems(itemSchema, extractor(page), this.validationMode, "Device", logger)`, pushing `valid` into the accumulator and `warnings` into a page-spanning `warnings[]`. Advance `nextUrl = page.pageDetails?.nextPageUrl`. On completion `return { ok: true, value: items, warnings }`. A mid-walk envelope failure discards accumulated `items`/`warnings` (returns `{ ok: false }`), exactly as pagination cannot continue past an unreadable `nextPageUrl`.
-3. **Update `getAccountDevices`** to call the new `getAllPages`.
+   - Notes: Use the `this.logger` field (from Step 1) — do **not** re-derive `config.logger ?? defaultLogger`. Per page: in `off`, treat `res.value as P` and read `pageDetails?.nextPageUrl` best-effort (no envelope check, no logging); in `strict`/`warn`, `envelopeSchema.safeParse(res.value)` directly — **not** `validate()`. On envelope failure, first `this.logger.error(...)` (naming the page URL and the parse error — this is the loudest, protocol-level failure and must be observable through the same logger as per-device drift; in `warn` it also replaces the old page-level `console.warn`), then return `{ ok: false, error: { type: VALIDATION_ERROR_TYPE, title: "Malformed devices page envelope", status: VALIDATION_ERROR_STATUS, detail: parsed.error.message, raw: parsed.error } }` (R5) — a **short stable** `title` with the serialized error in `detail`, mirroring `toProblemError`'s convention (do **not** dump `parsed.error.message` into `title`), and reusing the shared `VALIDATION_ERROR_TYPE`/`VALIDATION_ERROR_STATUS` constants rather than hand-written literals. Then `validateItems(itemSchema, extractor(page), this.validationMode, "Device", this.logger)`, pushing `valid` into the accumulator and `warnings` into a page-spanning `warnings[]`. Advance `nextUrl = page.pageDetails?.nextPageUrl`. On completion `return { ok: true, value: items, warnings }`. A mid-walk envelope failure discards accumulated `items`/`warnings` (returns `{ ok: false }`), exactly as pagination cannot continue past an unreadable `nextPageUrl`.
+   - **Off-path null-safety (Result contract):** in `off` there is no envelope check, so `res.value` may be `null` or a primitive. The devices extractor must be optional-chained (`(p) => p?.devices ?? []`) — see Step 4 — so `extractor(page)` never dereferences `null`/a non-object and throws a `TypeError` out of `getAccountDevices`. `validateItems`' `Array.isArray` guard then handles a non-array `devices`. Together these keep the "never throw, always `{ ok: false | true }`" Result contract mode-independent even though `off` runs no envelope validation.
+4. **Update `getAccountDevices`** to call the new `getAllPages`.
    - Files: `src/client.ts`
-   - Notes: `getAllPages<Device, DevicesEnvelope>(url, token, params, DevicesEnvelopeSchema, DeviceSchema, (p) => p.devices ?? [])`. Return type stays `Result<Device[]>`.
-4. **Update `getDeviceByUid`** to declare a `logger` local, pass it to `validate`, and log at error level on a `ZodError` in its `catch`.
+   - Notes: `getAllPages<Device, DevicesEnvelope>(url, token, params, DevicesEnvelopeSchema, DeviceSchema, (p) => p?.devices ?? [])`. The extractor is **optional-chained** (`p?.devices`) so an `off`-mode `null`/primitive page body never throws a `TypeError` (see Step 3 off-path null-safety). Return type stays `Result<Device[]>`.
+5. **Update `getDeviceByUid`** to use `this.logger`, pass it to `validate`, and log at error level on a `ZodError` in its `catch`.
    - Files: `src/client.ts`
-   - Notes: **First**, resolve `const logger = this.config.logger ?? defaultLogger;` at the top of `getDeviceByUid` (mirroring the Step 2 line in `getAllPages`) — the current method has no `logger` in scope, so without this both the `validate(...)` call and the `catch` `logger.error(...)` fail to compile (`Cannot find name 'logger'`) and Phase 2's own exit gate cannot pass. Then call `validate(DeviceSchema, res.value, this.validationMode, logger)`; in the `catch`, when `e instanceof ZodError`, build the error with the **same** `toProblemError("Device", e, res.value, 0)` builder used by `validateItems` so all three `validation-error` sites share one shape (short stable `title`, specifics in `detail`, `ZodError` in `raw`) — replacing the preexisting `title: e.message` dump — and `logger.error(...)` with that error's `detail` **before** returning `{ ok: false, error: toProblemError("Device", e, res.value, 0) }` (R7). Keep the `unknown-error` branch unchanged. `validate` itself still does not log in strict, so this is the single error log (no double-logging).
-5. **Clean up imports** in `client.ts`.
+   - Notes: Use the `this.logger` field (Step 1) — the current method has no logger in scope, so without it both the `validate(...)` call and the `catch` `this.logger.error(...)` fail to compile (`Cannot find name 'logger'`) and Phase 2's own exit gate cannot pass. Call `validate(DeviceSchema, res.value, this.validationMode, this.logger)`; in the `catch`, when `e instanceof ZodError`, **build the `ProblemError` once**: `const problem = toProblemError("Device", e, res.value, 0);` (the **same** builder/shape used by `validateItems`, so all three `validation-error` sites share one shape — short stable `title`, specifics in `detail`, `ZodError` in `raw` — replacing the preexisting `title: e.message` dump). Then `this.logger.error(...)` with `problem.detail` and `return { ok: false, error: problem };` — do **not** call `toProblemError` a second time for the return, and do **not** prefix the log with a duplicative `"Device … for {uid}"` (which double-prints the word "Device" and the uid, since `problem.detail` already reads `Device uid={uid} failed validation at path: …`); log `problem.detail` directly, or with a non-duplicative prefix like `` `getDeviceByUid: ${problem.detail}` ``. Keep the `unknown-error` branch unchanged. `validate` itself still does not log in strict, so this is the single error log (no double-logging).
+6. **Clean up imports** in `client.ts`.
    - Files: `src/client.ts`
-   - Notes: Add `validateItems` and `toProblemError` and keep `validate`; add `z` + `PaginationDataSchema`; drop now-unused `DevicesPageSchema`/`DevicesPage` imports if unreferenced (they remain defined/exported in `schemas.ts`). Ensure `defaultLogger` is imported. `ProblemError` is only needed as a type for the page-spanning `warnings[]` accumulator — import it if referenced.
+   - Notes: Add `validateItems`, `toProblemError`, `VALIDATION_ERROR_TYPE`, `VALIDATION_ERROR_STATUS` and keep `validate` (all from `./validation.js`); import `DevicesEnvelopeSchema`/`DevicesEnvelope` from `./internal/devicesEnvelope.js`; import `LoggerLike` + `defaultLogger` from `./logger.js`; drop now-unused `DevicesPageSchema`/`DevicesPage` imports if unreferenced (they remain defined/exported in `schemas.ts`). `ProblemError` is only needed as a type for the page-spanning `warnings[]` accumulator — import it if referenced. `z`/`PaginationDataSchema` move to `src/internal/devicesEnvelope.ts` and are no longer imported by `client.ts` unless otherwise referenced.
 
 ### Opinionated Implementation Notes (Examples)
 ```ts
-// src/client.ts (internal, NOT exported)
-import { z, ZodType } from "zod/v4";
-import { DeviceSchema, Device, PaginationDataSchema } from "./schemas.js";
-import { validate, validateItems, toProblemError, ValidationMode } from "./validation.js";
-import { defaultLogger } from "./logger.js";
-import { Result, ProblemError } from "./result.js";
+// src/internal/devicesEnvelope.ts (exported from this module, but NOT barrelled by src/index.ts)
+import { z } from "zod/v4";
+import { PaginationDataSchema } from "../schemas.js";
 
-const DevicesEnvelopeSchema = z.object({
+export const DevicesEnvelopeSchema = z.object({
   pageDetails: PaginationDataSchema.optional(),
   devices: z.array(z.unknown()).optional(),   // devices validated per-item, not here
 });
-type DevicesEnvelope = z.infer<typeof DevicesEnvelopeSchema>;
+export type DevicesEnvelope = z.infer<typeof DevicesEnvelopeSchema>;
+```
+
+```ts
+// src/client.ts
+import { ZodType, ZodError } from "zod/v4";
+import { DeviceSchema, Device } from "./schemas.js";
+import {
+  validate, validateItems, toProblemError,
+  VALIDATION_ERROR_TYPE, VALIDATION_ERROR_STATUS, ValidationMode,
+} from "./validation.js";
+import { DevicesEnvelopeSchema, DevicesEnvelope } from "./internal/devicesEnvelope.js";
+import { LoggerLike, defaultLogger } from "./logger.js";
+import { Result, ProblemError } from "./result.js";
+
+// In the constructor (reusing the value already passed to HttpClient):
+//   this.logger = config.logger ?? defaultLogger;
+// as a `private logger: LoggerLike` field — referenced by both methods below.
 
 private async getAllPages<
   T,
@@ -229,7 +257,7 @@ private async getAllPages<
   itemSchema: ZodType<T>,
   extractor: (page: P) => unknown[],
 ): Promise<Result<T[]>> {
-  const logger = this.config.logger ?? defaultLogger;
+  const logger = this.logger;            // resolved once in the constructor
   let nextUrl: string | null | undefined = url;
   let nextParams = params;
   const items: T[] = [];
@@ -254,9 +282,9 @@ private async getAllPages<
         return {
           ok: false,
           error: {
-            type: "validation-error",
-            title: "Malformed devices page envelope", // short stable title; error blob goes in detail/raw
-            status: 400,
+            type: VALIDATION_ERROR_TYPE,               // shared constant, not a hand-written literal
+            title: "Malformed devices page envelope",  // short stable title; error blob goes in detail/raw
+            status: VALIDATION_ERROR_STATUS,
             detail: parsed.error.message,
             raw: parsed.error,
           },
@@ -286,19 +314,17 @@ async getAccountDevices(params?: Record<string, any>): Promise<Result<Device[]>>
     params,
     DevicesEnvelopeSchema,
     DeviceSchema,
-    (p) => p.devices ?? [],
+    (p) => p?.devices ?? [],   // optional-chained: off-mode null/primitive page never throws
   );
 }
 
-// getDeviceByUid: declare a logger local at the top of the method (none exists today),
-// then reuse it in the validate() call and the catch. Without this, `logger` is undefined.
-const logger = this.config.logger ?? defaultLogger;
-// ... validate(DeviceSchema, res.value, this.validationMode, logger) inside the try ...
+// getDeviceByUid: use this.logger (resolved in the constructor) in the validate() call and the catch.
+// ... validate(DeviceSchema, res.value, this.validationMode, this.logger) inside the try ...
 } catch (e) {
   if (e instanceof ZodError) {
-    const problem = toProblemError("Device", e, res.value, 0); // same builder/shape as validateItems
-    logger.error(`Device validation failed for ${deviceUid}: ${problem.detail}`);
-    return { ok: false, error: problem };
+    const problem = toProblemError("Device", e, res.value, 0); // built ONCE; same builder/shape as validateItems
+    this.logger.error(`getDeviceByUid: ${problem.detail}`);    // problem.detail already names Device + uid + path
+    return { ok: false, error: problem };                       // reuse the same object, no second toProblemError call
   }
   return { ok: false, error: { type: "unknown-error", title: String(e), status: 500, raw: e } };
 }
@@ -307,7 +333,7 @@ const logger = this.config.logger ?? defaultLogger;
 ### Tests (in this phase)
 - Extend `src/__tests__/devicesMethod.test.ts` (reuse its `MockAxios`) and add a capturing mock logger passed via `createDattoRmmClient({ ..., logger })`. Build divergent payloads by cloning the valid `device.json` fixture and mutating one copy (e.g. `deviceClass: "router"` — outside the enum) rather than adding many fixtures.
 - **Strict, mixed page (R1, R2, R3):** page with `[validDevice, divergentDevice]` → `result.ok === true`, `value.length === 1` (only the valid device), `result.warnings.length === 1` with a `detail` naming the divergent device and the failing path, and `logger.error` called once. Existing "returns validated data" / "paginates automatically" tests must still pass.
-- **Envelope schema accepts existing fixtures (design Risks & Mitigations row 3):** assert `DevicesEnvelopeSchema.safeParse(...)` succeeds (`.success === true`) on each existing page fixture (`devicesPage.json`, `devicesPage1.json`, `devicesPage2.json`), guarding the envelope-vs-`DevicesPageSchema` `pageDetails` consistency directly rather than by side effect. (The envelope schema is non-exported; reference it via a small test-only re-export or by importing the module under test — keep it out of `src/index.ts`.)
+- **Envelope schema accepts existing fixtures (design Risks & Mitigations row 3):** assert `DevicesEnvelopeSchema.safeParse(...)` succeeds (`.success === true`) on each existing page fixture (`devicesPage.json`, `devicesPage1.json`, `devicesPage2.json`), guarding the envelope-vs-`DevicesPageSchema` `pageDetails` consistency directly rather than by side effect. The test imports the real schema from `../internal/devicesEnvelope.js` (the same non-barrelled module `client.ts` uses) — **no** test-only re-export from `client.ts` and **no** inline reconstruction, so the test guards the actual schema the client runs, and the schema never reaches `src/index.ts`.
 - **Strict, malformed envelope (R5) + log:** response where `devices` is not an array (e.g. `"devices": "nope"`) → `{ ok: false, error: { type: "validation-error", title: "Malformed devices page envelope" } }`, and `logger.error` called once (envelope failure is observable through the configured logger, not silent).
 - **Strict, multi-page abort (R5):** page1 valid (with `nextPageUrl` → page2), page2 envelope malformed → `{ ok: false }`, no partial `value`; assert page1's would-be valid device is **not** returned.
 - **Strict, cross-page warnings accumulation (R1, R2, R3):** page1 `[valid1, divergent1]` (with `nextPageUrl` → page2), page2 `[valid2, divergent2]` (terminal, falsy `nextPageUrl`) → `result.ok === true`, `value` contains exactly `valid1` and `valid2` (both valid devices from both pages), `warnings.length === 2` (one entry naming each divergent device), and `logger.error` called twice. Proves the `while (nextUrl)` loop concatenates `valid` and `warnings` across successful pages rather than only returning the last page's.
@@ -315,7 +341,9 @@ const logger = this.config.logger ?? defaultLogger;
 - **Warn, malformed envelope hard-fail (R5, Breaking Change #2) + log:** `validationMode: "warn"` with `devices` not an array → `{ ok: false, error: { type: "validation-error", title: "Malformed devices page envelope" } }`, and `logger.error` called once (replacing the old page-level `console.warn`).
 - **Off, per-device passthrough (R8):** `validationMode: "off"` with a **well-formed page whose `devices` is an array containing a divergent device** → the divergent device flows through untouched into `value` (no drop, no re-parse), no envelope check runs, and **no logger calls** are made.
 - **Off, non-array `devices` does not throw (Result-contract guard):** `validationMode: "off"` with a page whose `devices` is a non-array object → `getAllPages` returns `{ ok: true }` (that page contributes zero items) rather than throwing a `TypeError` out of `getAccountDevices`. This is guaranteed by `validateItems`' `off` branch `Array.isArray` guard (Phase 1), keeping the Result contract — every failure returned as `{ ok: false }`, never thrown — mode-independent even though `off` runs no envelope check.
-- **`getDeviceByUid` fail-hard + log (R7):** strict, divergent single device → `{ ok: false, error: { type: "validation-error", title: "Device failed schema validation" } }` (the shared `toProblemError` shape — short stable `title`, `ZodError` in `raw`, not the old `title: e.message` dump) and `logger.error` called once.
+- **Off, `null`/primitive page body does not throw (Result-contract guard, upstream of `validateItems`):** `validationMode: "off"` with a response body that is `null` (and a second case: a primitive, e.g. a string) → `getAllPages` returns `{ ok: true, value: [] }` and does **not** throw a `TypeError`. This exercises the **optional-chained extractor** (`(p) => p?.devices ?? []`, Step 4), which is upstream of `validateItems`' guard — the `Array.isArray` guard alone cannot cover a `null` page because the throw would occur during `extractor(page)` evaluation before `validateItems` runs. Together they make the "never throw" claim actually hold for `off` regardless of body shape.
+- **`getDeviceByUid` fail-hard + log (R7):** strict, divergent single device → `{ ok: false, error: { type: "validation-error", title: "Device failed schema validation" } }` (the shared `toProblemError` shape — short stable `title`, `ZodError` in `raw`, not the old `title: e.message` dump) and `logger.error` called once **with `problem.detail` and no duplicated "Device"/uid** (assert the message equals `problem.detail` or the `getDeviceByUid: ${problem.detail}` prefix form — it must not contain "Device" twice).
+- **`getDeviceByUid` warn-mode log names the path (R6, engineer-r2-f1):** `validationMode: "warn"`, divergent single device → device returned raw (`{ ok: true }`, per the warn passthrough contract for a single value), and `logger.warn` called with a message that **names the failing path** (contains the path segment) and does **not** contain the raw multi-line `ZodError.message` blob. Proves the single-value seam's warn log is structured, consistent with the strict path.
 
 ### Documentation (if needed)
 - Files: `README.md`.
@@ -326,13 +354,19 @@ const logger = this.config.logger ?? defaultLogger;
 ```bash
 npm run build
 npm test
-# R4 guard (mechanically enforced): schemas.ts/result.ts/index.ts must not change — the envelope schema stays internal to client.ts.
+# R4 guard (a) — the barrelled schemas/result/index modules must not change (envelope schema lives in the
+# un-barrelled src/internal/devicesEnvelope.ts, and index.ts must NOT gain an `export * from "./internal/..."`).
 # Use `HEAD` so staged/committed edits are caught too, not just unstaged working-tree changes.
 git diff --name-only HEAD | grep -qE '^src/(schemas|result|index)\.ts$' && { echo 'R4 violation: a protected file (schemas.ts/result.ts/index.ts) changed'; exit 1; } || true
+# R4 guard (b) — public-surface growth via a NEW top-level export in a barrelled module the phase edits.
+# client.ts and config.ts are re-exported by index.ts with `export *`, so a new `export` in them is a new public API.
+# (Class methods are not top-level `export`s, so this does not false-positive on method edits.)
+git diff HEAD -- src/client.ts src/config.ts | grep -qE '^\+export ' && { echo 'R4 violation: a new top-level export was added to a barrelled module (client.ts/config.ts)'; exit 1; } || true
 # Doc-landing guard: the release-note section added in the Documentation step must exist.
 grep -q '## Resilient validation' README.md || { echo 'Documentation not landed: missing "## Resilient validation" section in README.md'; exit 1; }
 ```
-- The `git diff` guard exits non-zero if `src/schemas.ts`, `src/result.ts`, or `src/index.ts` is modified — mechanically enforcing that all Phase 2 work is confined to `src/client.ts` (+ the test file) and that the internal envelope schema is never exported (R4).
+- Guard (a) exits non-zero if `src/schemas.ts`, `src/result.ts`, or `src/index.ts` is modified — confining Phase 2 to `src/client.ts` + `src/internal/devicesEnvelope.ts` (+ the test file) and, because it also trips on any `index.ts` edit, mechanically preventing the internal envelope module from being barrelled (R4).
+- Guard (b) closes the blind spot in guard (a): a new top-level `export` added to `client.ts` or `config.ts` widens the public surface **without** touching any file guard (a) watches. It fails the gate if either barrelled module gains a `+export ` line (R4).
 - The `grep` guard confirms the README release-note section landed.
 - All pre-existing tests (`deviceSchema.test.ts`, `client.test.ts`, and the original two `devicesMethod.test.ts` cases) pass unmodified.
 
