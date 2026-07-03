@@ -1,0 +1,5 @@
+## reviser — round 1
+
+| ID | Disposition | Rationale (and, for Fixed, what changed) |
+|----|-------------|-------------------------------------------|
+| implementation-auditor-r1-f1 | Fixed | Added the missing non-object-body coverage in a validating mode. In `src/__tests__/devicesMethod.test.ts`: a new `test.each(["null", "a primitive string (e.g. an HTML error page)"])` block under the `strict` section asserts `DEVICES_URL` responses of `null` and an HTML-string body both hard-fail with `{ error: { type: "validation-error", title: "Malformed devices page envelope" } }` and exactly one `logger.error` call; a parallel single test does the same for `validationMode: "warn"` with a `null` body. These sit alongside (and are distinguishable from) the existing `off`-mode `null`/primitive tests, which assert the opposite (pass-through, no hard-fail) — together they pin that the non-object-body branch is mode-gated exactly as R5/design L139 require. `npm run build` and `npm test` pass (36/36, up from 33), and both R4 exit-gate guards plus the doc-landing grep still pass. |

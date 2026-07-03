@@ -222,6 +222,27 @@ describe("getAccountDevices resilient validation", () => {
   });
 
   test.each([
+    ["null", null],
+    ["a primitive string (e.g. an HTML error page)", "<html>not json</html>"],
+  ])(
+    "strict, a non-object body (%s) hard-fails as a malformed envelope and logs (R5)",
+    async (_label, body) => {
+      const logger = mockLogger();
+      const client = buildClient(
+        { ...authResponses, [DEVICES_URL]: body },
+        { logger },
+      );
+
+      const result = await client.getAccountDevices();
+      expect(result.ok).toBe(false);
+      const r = result as any;
+      expect(r.error.type).toBe("validation-error");
+      expect(r.error.title).toBe("Malformed devices page envelope");
+      expect(logger.error).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test.each([
     ["an empty object", {}],
     ["an auth-error-shaped body", { error: "unauthorized" }],
   ])(
@@ -374,6 +395,21 @@ describe("getAccountDevices resilient validation", () => {
           devices: "nope",
         },
       },
+      { validationMode: "warn", logger },
+    );
+
+    const result = await client.getAccountDevices();
+    expect(result.ok).toBe(false);
+    const r = result as any;
+    expect(r.error.type).toBe("validation-error");
+    expect(r.error.title).toBe("Malformed devices page envelope");
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  test("warn, a non-object body (null) hard-fails as a malformed envelope and logs (R5, Breaking Change #2)", async () => {
+    const logger = mockLogger();
+    const client = buildClient(
+      { ...authResponses, [DEVICES_URL]: null },
       { validationMode: "warn", logger },
     );
 
