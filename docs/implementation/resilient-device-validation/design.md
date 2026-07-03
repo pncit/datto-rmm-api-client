@@ -114,7 +114,7 @@ function validateItems<T>(
 
 Each rejection `ProblemError` uses `type: "validation-error"` and carries, in `detail`, the offending device's identity (`id`/`uid` where those fields are extractable from the raw object) and the Zod issue path, with the `ZodError` in `raw`.
 
-**Logger-aware `validate()`.** `validate(schema, data, mode, logger)` — the single-value seam used by `getDeviceByUid`. In `warn` it logs through `logger.warn` instead of `console.warn`; in `strict` it still throws (its callers decide whether a throw is fatal). The per-item helper handles the array case; `validate()` handles the single-value case. Both share the same logger.
+**Logger-aware `validate()`.** `validate(schema, data, mode, logger?)` — the single-value seam used by `getDeviceByUid`. The `logger` is an **optional trailing parameter that defaults to `defaultLogger`**, so existing three-argument calls (e.g. `validate(DeviceSchema, device, "strict")` in `deviceSchema.test.ts`) keep compiling unchanged; the `warn`-mode routing guarantee (R6) therefore depends on the live caller — the client — passing `config.logger ?? defaultLogger` at the call site, which it does. In `warn` it logs through `logger.warn` instead of `console.warn`; in `strict` it still throws (its callers decide whether a throw is fatal). The per-item helper handles the array case; `validate()` handles the single-value case. Both share the same logger.
 
 ### Design Decisions
 
@@ -169,6 +169,7 @@ None to the public type surface. Two **behavioral** changes worth calling out in
 
 1. In `strict` mode, `getAccountDevices()` that previously returned `{ ok: false }` on a drifted account now returns `{ ok: true }` with the valid devices and a populated `warnings[]`. A consumer that branches on `!result.ok` to detect drift must instead inspect `result.warnings`. This is the intended fix, not a regression, but it changes the shape of the outcome for drifted accounts.
 2. In `warn` mode, a *structurally malformed* page envelope (e.g. `devices` is not an array) now returns `{ ok: false, error: { type: "validation-error" } }`, where it previously logged and returned `{ ok: true, value: [] }`. This is the intended Decision 2 behavior — a malformed envelope is a protocol error in every mode that validates — and it affects only the envelope, not per-device data, which continues to pass through raw. `off` is unaffected (it runs no envelope check).
+3. In `warn` mode, drift diagnostics also change *granularity*: the old page-level `validate()` emitted one `console.warn` per page carrying a single page-wide `ZodError`, whereas the per-item helper emits **one `logger.warn` per divergent device**. So `warn` output changes both sink (now `config.logger`, item 1 above notwithstanding) and shape/volume (N per-device lines instead of one per-page line). The returned data is unchanged; only the diagnostic stream is finer-grained.
 
 ### Data Migration
 
