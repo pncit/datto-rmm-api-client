@@ -10,6 +10,7 @@ import {
   firstIssuePath,
   VALIDATION_ERROR_TYPE,
   VALIDATION_ERROR_STATUS,
+  VALIDATION_ERROR_PREFIX,
   ValidationMode,
 } from "./validation.js";
 import { Device, DeviceSchema } from "./schemas.js";
@@ -19,6 +20,11 @@ import {
 } from "./internal/devicesEnvelope.js";
 import { ZodError, ZodType } from "zod/v4";
 import { Result, ProblemError } from "./result.js";
+
+// Single source of truth for the envelope hard-fail's title, reused in the log line, the
+// ProblemError.title, and the detail template so the phrase can't drift across the three
+// call sites (mirrors firstIssuePath's single-source-of-truth role for the failing path).
+const MALFORMED_ENVELOPE_TITLE = "Malformed devices page envelope";
 
 export class DattoRmmClient {
   private rateLimiter: SlidingWindowRateLimiter;
@@ -99,15 +105,15 @@ export class DattoRmmClient {
           // convention and detail is never a raw multi-line ZodError.message blob.
           const envelopePath = firstIssuePath(parsed.error);
           this.logger.error(
-            `Malformed devices page envelope at ${nextUrl} (path: ${envelopePath})`,
+            `${VALIDATION_ERROR_PREFIX}: ${MALFORMED_ENVELOPE_TITLE} at ${nextUrl} (path: ${envelopePath})`,
           );
           return {
             ok: false,
             error: {
               type: VALIDATION_ERROR_TYPE,
-              title: "Malformed devices page envelope",
+              title: MALFORMED_ENVELOPE_TITLE,
               status: VALIDATION_ERROR_STATUS,
-              detail: `Malformed devices page envelope (path: ${envelopePath})`,
+              detail: `${MALFORMED_ENVELOPE_TITLE} (path: ${envelopePath})`,
               raw: parsed.error,
             },
           };
@@ -180,7 +186,9 @@ export class DattoRmmClient {
         // validation-error site (per-device page rejections, this catch, the envelope
         // hard-fail) shares one shape — short stable title, specifics in detail, ZodError in raw.
         const problem = toProblemError("Device", e, res.value, 0);
-        this.logger.error(`getDeviceByUid: ${problem.detail}`);
+        this.logger.error(
+          `${VALIDATION_ERROR_PREFIX}: getDeviceByUid: ${problem.detail}`,
+        );
         return { ok: false, error: problem };
       }
       return {

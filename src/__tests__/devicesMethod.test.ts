@@ -1,6 +1,7 @@
 import { createDattoRmmClient } from "../client";
 import { DevicesEnvelopeSchema } from "../internal/devicesEnvelope";
 import { LoggerLike } from "../logger";
+import { Result } from "../result";
 import { ZodError } from "zod/v4";
 import * as fs from "fs";
 import * as path from "path";
@@ -57,6 +58,28 @@ function withOverrides(overrides: Record<string, unknown>) {
 /** A device that diverges from DeviceSchema via an out-of-enum deviceClass. */
 function divergentDevice(overrides: Record<string, unknown> = {}) {
   return withOverrides({ deviceClass: "router", ...overrides });
+}
+
+/**
+ * Narrows `result` to its `{ ok: true }` variant. Used in place of `result as any` so
+ * `Result<T>`'s discriminated union keeps narrowing live for every field access that follows,
+ * instead of a runtime-only `expect(result.ok).toBe(true)` check that the compiler can't use.
+ */
+function assertOk<T>(
+  result: Result<T>,
+): asserts result is Extract<Result<T>, { ok: true }> {
+  if (!result.ok) {
+    throw new Error(`expected ok, got: ${JSON.stringify(result)}`);
+  }
+}
+
+/** Fail-branch counterpart to `assertOk`. */
+function assertFail<T>(
+  result: Result<T>,
+): asserts result is Extract<Result<T>, { ok: false }> {
+  if (result.ok) {
+    throw new Error(`expected failure, got: ${JSON.stringify(result)}`);
+  }
 }
 
 test("getAccountDevices returns validated data", async () => {
@@ -154,10 +177,10 @@ describe("getAccountDevices resilient validation", () => {
     );
 
     const result = await client.getAccountDevices();
-    expect(result.ok).toBe(true);
-    const r = result as any;
+    assertOk(result);
+    const r = result;
     expect(Array.isArray(r.warnings)).toBe(true);
-    expect(r.warnings.length).toBe(0);
+    expect((r.warnings ?? []).length).toBe(0);
     expect(logger.error).not.toHaveBeenCalled();
   });
 
@@ -181,14 +204,15 @@ describe("getAccountDevices resilient validation", () => {
     );
 
     const result = await client.getAccountDevices();
-    expect(result.ok).toBe(true);
-    const r = result as any;
+    assertOk(result);
+    const r = result;
+    const warnings = r.warnings ?? [];
     expect(r.value.length).toBe(1);
     expect(r.value[0].id).toBe(1);
-    expect(r.warnings.length).toBe(1);
-    expect(r.warnings[0].type).toBe("validation-error");
-    expect(r.warnings[0].detail).toContain("id=2");
-    expect(r.warnings[0].detail).toContain("deviceClass");
+    expect(warnings.length).toBe(1);
+    expect(warnings[0].type).toBe("validation-error");
+    expect(warnings[0].detail).toContain("id=2");
+    expect(warnings[0].detail).toContain("deviceClass");
     expect(logger.error).toHaveBeenCalledTimes(1);
   });
 
@@ -211,8 +235,8 @@ describe("getAccountDevices resilient validation", () => {
     );
 
     const result = await client.getAccountDevices();
-    expect(result.ok).toBe(false);
-    const r = result as any;
+    assertFail(result);
+    const r = result;
     expect(r.error.type).toBe("validation-error");
     expect(r.error.title).toBe("Malformed devices page envelope");
     expect(r.error.detail).toMatch(/^Malformed devices page envelope \(path:/);
@@ -240,8 +264,8 @@ describe("getAccountDevices resilient validation", () => {
     );
 
     const result = await client.getAccountDevices();
-    expect(result.ok).toBe(false);
-    const r = result as any;
+    assertFail(result);
+    const r = result;
     expect(r.error.type).toBe("validation-error");
     expect(r.error.title).toBe("Malformed devices page envelope");
     expect(r.error.detail).toMatch(/^Malformed devices page envelope \(path:/);
@@ -263,8 +287,8 @@ describe("getAccountDevices resilient validation", () => {
       );
 
       const result = await client.getAccountDevices();
-      expect(result.ok).toBe(false);
-      const r = result as any;
+      assertFail(result);
+      const r = result;
       expect(r.error.type).toBe("validation-error");
       expect(r.error.title).toBe("Malformed devices page envelope");
       expect(logger.error).toHaveBeenCalledTimes(1);
@@ -284,8 +308,8 @@ describe("getAccountDevices resilient validation", () => {
       );
 
       const result = await client.getAccountDevices();
-      expect(result.ok).toBe(true);
-      const r = result as any;
+      assertOk(result);
+      const r = result;
       expect(r.value).toEqual([]);
       expect(r.warnings).toEqual([]);
       expect(logger.error).not.toHaveBeenCalled();
@@ -324,10 +348,10 @@ describe("getAccountDevices resilient validation", () => {
     );
 
     const result = await client.getAccountDevices();
-    expect(result.ok).toBe(true);
-    const r = result as any;
+    assertOk(result);
+    const r = result;
     expect(r.value.map((d: any) => d.id).sort()).toEqual([1, 2]);
-    expect(r.warnings.length).toBe(2);
+    expect((r.warnings ?? []).length).toBe(2);
     expect(logger.error).toHaveBeenCalledTimes(2);
   });
 
@@ -361,11 +385,11 @@ describe("getAccountDevices resilient validation", () => {
     );
 
     const result = await client.getAccountDevices();
-    expect(result.ok).toBe(false);
-    const r = result as any;
+    assertFail(result);
+    const r = result;
     expect(r.error.type).toBe("validation-error");
     expect(r.error.title).toBe("Malformed devices page envelope");
-    expect(r.value).toBeUndefined();
+    expect("value" in r).toBe(false);
     const errorMessages = (logger.error as jest.Mock).mock.calls.map((c) =>
       String(c[0]),
     );
@@ -398,8 +422,8 @@ describe("getAccountDevices resilient validation", () => {
       );
 
       const result = await client.getAccountDevices();
-      expect(result.ok).toBe(true);
-      const r = result as any;
+      assertOk(result);
+      const r = result;
       expect(r.value.length).toBe(2);
       expect(r.value.some((d: any) => d.id === 2)).toBe(true);
       expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -428,8 +452,8 @@ describe("getAccountDevices resilient validation", () => {
     );
 
     const result = await client.getAccountDevices();
-    expect(result.ok).toBe(false);
-    const r = result as any;
+    assertFail(result);
+    const r = result;
     expect(r.error.type).toBe("validation-error");
     expect(r.error.title).toBe("Malformed devices page envelope");
     expect(logger.error).toHaveBeenCalledTimes(1);
@@ -443,8 +467,8 @@ describe("getAccountDevices resilient validation", () => {
     );
 
     const result = await client.getAccountDevices();
-    expect(result.ok).toBe(false);
-    const r = result as any;
+    assertFail(result);
+    const r = result;
     expect(r.error.type).toBe("validation-error");
     expect(r.error.title).toBe("Malformed devices page envelope");
     expect(logger.error).toHaveBeenCalledTimes(1);
@@ -470,10 +494,11 @@ describe("getAccountDevices resilient validation", () => {
     );
 
     const result = await client.getAccountDevices();
-    expect(result.ok).toBe(true);
-    const r = result as any;
+    assertOk(result);
+    const r = result;
     expect(r.value.length).toBe(2);
-    expect(r.value.find((d: any) => d.id === 2).deviceClass).toBe("router");
+    const found = r.value.find((d) => d.id === 2);
+    expect(found?.deviceClass).toBe("router");
     expect(logger.warn).not.toHaveBeenCalled();
     expect(logger.error).not.toHaveBeenCalled();
   });
@@ -551,8 +576,8 @@ describe("getDeviceByUid", () => {
     });
 
     const result = await client.getDeviceByUid("device-uid-1");
-    expect(result.ok).toBe(false);
-    const r = result as any;
+    assertFail(result);
+    const r = result;
     expect(r.error.type).toBe("validation-error");
     expect(r.error.title).toBe("Device failed schema validation");
     expect(r.error.raw).toBeInstanceOf(ZodError);
@@ -586,8 +611,8 @@ describe("getDeviceByUid", () => {
     });
 
     const result = await client.getDeviceByUid("device-uid-1");
-    expect(result.ok).toBe(true);
-    const r = result as any;
+    assertOk(result);
+    const r = result;
     expect(r.value.deviceClass).toBe("router");
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
