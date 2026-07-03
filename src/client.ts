@@ -185,7 +185,13 @@ export class DattoRmmClient {
         // ProblemError once via the same shared builder validateItems uses, so every
         // validation-error site (per-device page rejections, this catch, the envelope
         // hard-fail) shares one shape — short stable title, specifics in detail, ZodError in raw.
-        const problem = toProblemError("Device", e, res.value, 0);
+        // No index/identityOverride: extractIdentity's id-first result already names the
+        // divergent device (every valid Device carries a numeric `id`, per schemas.ts), so the
+        // detail reads `id=...` rather than `uid=...` even though the endpoint is addressed by
+        // uid — acceptable per plan (R2 permits either id or uid as the identity). `index`
+        // defaults to 0 and is only reached as a fallback if `id` is itself absent from the
+        // divergent payload.
+        const problem = toProblemError("Device", e, res.value);
         this.logger.error(
           `${VALIDATION_ERROR_PREFIX}: getDeviceByUid: ${problem.detail}`,
         );

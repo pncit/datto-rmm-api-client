@@ -112,19 +112,18 @@ export function validateItems<T>(
  * and getDeviceByUid's catch. Exported for that reuse; validation.ts is not part of the
  * src/index.ts barrel, so this stays off the public surface.
  *
- * `identityOverride`, when supplied, is used verbatim in place of `extractIdentity(item)` —
- * lets a single-value caller (e.g. getDeviceByUid) name the identity it already knows from its
- * own argument, rather than relying on the array-centric `item`/`index` fallback.
+ * `index` defaults to 0 so a single-value caller (e.g. getDeviceByUid, which has no array
+ * position) can omit it entirely rather than passing a meaningless literal. Array callers
+ * (`validateItems`) always pass the item's real index, used only as the `index N` identity
+ * fallback below when `extractIdentity` can't find an `id`/`uid` on the item itself.
  */
 export function toProblemError(
   entityLabel: string,
   error: ZodError,
   item: unknown,
-  index: number,
-  identityOverride?: string,
+  index = 0,
 ): ProblemError {
-  const identity =
-    identityOverride ?? extractIdentity(item) ?? `index ${index}`;
+  const identity = extractIdentity(item) ?? `index ${index}`;
   const path = firstIssuePath(error);
   return {
     type: VALIDATION_ERROR_TYPE,
@@ -138,9 +137,7 @@ export function toProblemError(
 /**
  * Best-effort identity extraction, limited to the `id`/`uid` field conventions: `id` (number or
  * string) is preferred, then `uid` (string). An entity keyed by any other field is not
- * recognized here and falls back to the caller's `index N` in `toProblemError`. A caller with a
- * differently-keyed entity should pass `identityOverride` to `toProblemError` instead of relying
- * on this function to discover its key.
+ * recognized here and falls back to the caller's `index N` in `toProblemError`.
  */
 function extractIdentity(item: unknown): string | undefined {
   if (item && typeof item === "object") {
