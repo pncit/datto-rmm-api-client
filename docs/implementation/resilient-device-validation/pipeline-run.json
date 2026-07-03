@@ -2129,6 +2129,29 @@
       "phase": 2,
       "attempt": 1,
       "result": "pass"
+    },
+    {
+      "t": 1783120694,
+      "kind": "worker",
+      "agent": "process-historian",
+      "label": "implementation historian",
+      "ok": true,
+      "started_at": "2026-07-03T23:15:54+00:00",
+      "duration_s": 139.2,
+      "api_duration_s": 133.2,
+      "turns": 53,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 2.0121,
+      "tokens": {
+        "input": 4859,
+        "output": 10506,
+        "cache_read": 182792,
+        "cache_creation": 163375
+      },
+      "session_id": "7052190c-2b2a-4b57-9324-0d73444c6a61",
+      "turn": "docs/implementation/resilient-device-validation/implementation-artifact.md"
     }
   ],
   "invocation": {
