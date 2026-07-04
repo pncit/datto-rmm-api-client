@@ -14,38 +14,36 @@ jobs:
   validate:
     # Restrict this job to same-repo branches — pushing a branch here requires
     # write access (PNC members), so PRs from forks skip validation. On the
-    # ephemeral GitHub-hosted runner below this is now a POLICY choice, not a
+    # ephemeral GitHub-hosted runner below this is a POLICY choice, not a
     # runner-safety requirement (fork runs are sandboxed and get no secrets).
     # Drop this `if` if you'd rather give community fork PRs CI feedback.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
+      # Single checkout with a little history: fetch-depth: 2 + an explicit
+      # fetch of the base branch gives the version-bump gate the base
+      # package.json to diff against.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
       # Version-bump gate (PRs only): datto-rmm-api-client is a published
       # library, so every PR into main must bump package.json's version —
       # each merge to main triggers a publish (see npm-publish.yml), and npm
-      # rejects republishing an existing version. Needs its own checkout with a
-      # little history because validate-codebase's internal checkout comes later
-      # and is shallow. fetch-depth: 2 + an explicit fetch of the base branch
-      # gives us the base package.json to diff against.
+      # rejects republishing an existing version.
       #
       # Dependabot PRs are exempt: they only bump dependency versions, never
       # the package's own version (that happens at release time), so this gate
       # would fail 100% of them. The version bump is applied when the batched
       # dependency updates are released.
-      - name: Checkout (for version-bump check)
-        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
       - name: Verify version changed
-        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        if: github.actor != 'dependabot[bot]'
         shell: bash
         run: |
           set -euo pipefail
           CUR=$(node -p "require('./package.json').version || ''")
 
-          # Get the base branch (usually main)
           BASE_BRANCH="${GITHUB_BASE_REF:-main}"
           git fetch origin "$BASE_BRANCH:$BASE_BRANCH" || true
 
@@ -73,10 +71,23 @@ jobs:
             echo "Version changed: $PREV -> $CUR ✓"
           fi
 
-      # Codebase checks: npm ci + lint + typecheck + test. This action does
-      # its own checkout + setup-node (node-version-file: .nvmrc). datto-rmm's
-      # dependencies are all public, so the npm-token is only needed to satisfy
-      # the action's required input (npm ci resolves fine without auth).
-      - uses: pncit/shared-actions/.github/actions/validate-codebase@v1
+      # Codebase checks: npm ci + lint + typecheck + test. Inlined (rather than
+      # calling pncit/shared-actions) because that repo is private and a public
+      # repo can't resolve a private org action.
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          npm-token: ${{ secrets.NPM_TOKEN }}
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test

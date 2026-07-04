@@ -16,11 +16,18 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      # npm ci + lint + typecheck + test. Does its own checkout + setup-node
-      # (node-version-file: .nvmrc), so it's self-contained on a hosted runner.
-      - uses: pncit/shared-actions/.github/actions/validate-codebase@v1
+      # npm ci + lint + typecheck + test. Inlined (rather than calling
+      # pncit/shared-actions) because that repo is private and a public repo
+      # can't resolve a private org action.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          npm-token: ${{ secrets.NPM_TOKEN }}
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
 
   publish:
     needs: validate
@@ -30,7 +37,7 @@ jobs:
         with:
           fetch-depth: 2
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org
