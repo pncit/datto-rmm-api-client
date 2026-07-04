@@ -1,6 +1,6 @@
 {
   "name": "datto-rmm-api-client",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "ESM-only server-side TypeScript client for Datto RMM API v2",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,8 +12,7 @@
     "lint:fix": "eslint src --fix",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build && npm test",
-    "publish": "npm publish --access public"
+    "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "keywords": [],
   "author": "Rob Gilbreath",
