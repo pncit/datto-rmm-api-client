@@ -1,0 +1,84 @@
+name: Validate
+
+on:
+  pull_request:
+    branches: [main]
+  # NOTE: on-push (main) validation lives in npm-publish.yml as a prerequisite
+  # job that gates the publish, so it isn't duplicated here. Running it in both
+  # places would re-introduce a validate/publish race.
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: self-hosted
+    steps:
+      # Env check: fail fast if the runner's Node/npm majors don't match
+      # what the repo expects (NODE_MAJOR_VERSION / NPM_MAJOR_VERSION are
+      # pncit org-level Actions variables).
+      - uses: pncit/shared-actions/.github/actions/verify-node-toolchain@v1
+        with:
+          node-major-version: ${{ vars.NODE_MAJOR_VERSION }}
+          npm-major-version: ${{ vars.NPM_MAJOR_VERSION }}
+
+      # Version-bump gate (PRs only): datto-rmm-api-client is a published
+      # library, so every PR into main must bump package.json's version —
+      # each merge to main triggers a publish (see npm-publish.yml), and npm
+      # rejects republishing an existing version. Needs its own checkout with a
+      # little history because validate-codebase's internal checkout comes later
+      # and is shallow. fetch-depth: 2 + an explicit fetch of the base branch
+      # gives us the base package.json to diff against.
+      #
+      # Dependabot PRs are exempt: they only bump dependency versions, never
+      # the package's own version (that happens at release time), so this gate
+      # would fail 100% of them. The version bump is applied when the batched
+      # dependency updates are released.
+      - name: Checkout (for version-bump check)
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verify version changed
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          CUR=$(node -p "require('./package.json').version || ''")
+
+          # Get the base branch (usually main)
+          BASE_BRANCH="${GITHUB_BASE_REF:-main}"
+          git fetch origin "$BASE_BRANCH:$BASE_BRANCH" || true
+
+          if git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1; then
+            PREV=$(git show "$BASE_BRANCH:package.json" 2>/dev/null \
+              | node -p "(() => { const s=require('fs').readFileSync(0,'utf8'); try { return JSON.parse(s).version || '' } catch { return '' } })()" \
+              || true)
+          else
+            PREV=""
+          fi
+
+          if [ -z "$CUR" ]; then
+            echo "::error::No version found in package.json"
+            exit 1
+          fi
+
+          if [ -n "$PREV" ] && [ "$CUR" = "$PREV" ]; then
+            echo "::error::package.json version unchanged ($PREV -> $CUR). Version must be bumped for PRs."
+            exit 1
+          fi
+
+          if [ -z "$PREV" ]; then
+            echo "Could not determine previous version, skipping version check"
+          else
+            echo "Version changed: $PREV -> $CUR ✓"
+          fi
+
+      # Codebase checks: npm ci + lint + typecheck + test. This action does
+      # its own checkout + setup-node (node-version-file: .nvmrc). datto-rmm's
+      # dependencies are all public, so the npm-token is only needed to satisfy
+      # the action's required input (npm ci resolves fine without auth).
+      - uses: pncit/shared-actions/.github/actions/validate-codebase@v1
+        with:
+          npm-token: ${{ secrets.NPM_TOKEN }}

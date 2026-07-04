@@ -8,14 +8,31 @@
     "test": "jest",
     "build": "tsc",
     "format": "prettier --write .",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build",
+    "prepublishOnly": "npm run clean && npm run build && npm test",
     "publish": "npm publish --access public"
   },
   "keywords": [],
   "author": "Rob Gilbreath",
   "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pncit/datto-rmm-api-client.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pncit/datto-rmm-api-client/issues"
+  },
+  "homepage": "https://github.com/pncit/datto-rmm-api-client#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
     "README.md",
@@ -26,7 +43,12 @@
     "zod": "^4.0.5"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/jest": "^30.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.62.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
     "jest": "^30.0.4",
     "prettier": "^3.6.2",
     "ts-jest": "^29.4.0",
