@@ -24,7 +24,7 @@ jobs:
       # fetch of the base branch gives the version-bump gate the base
       # package.json to diff against.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 2
 
