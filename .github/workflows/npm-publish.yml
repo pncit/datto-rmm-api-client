@@ -1,0 +1,81 @@
+name: publish-on-version-bump
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write # Required for npm OIDC trusted publishing (+ provenance)
+  contents: read
+
+jobs:
+  # Validate the actual commit that landed on main BEFORE publishing. The PR's
+  # validation ran against the PR head, but a squash/merge produces a new commit
+  # that was never validated as-is — so we re-validate here. publish `needs` this
+  # job, so a validation failure now blocks the publish.
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      # npm ci + lint + typecheck + test. Inlined (rather than calling
+      # pncit/shared-actions) because that repo is private and a public repo
+      # can't resolve a private org action.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+
+      # OIDC trusted publishing requires a recent npm (>= 11.5.1). Pin to latest
+      # so the runner's bundled npm can't fall behind the OIDC handshake.
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Skip if this exact version is already on npm — makes re-runs and merges
+      # that don't bump the version safe no-ops instead of hard failures.
+      - name: Check if version already published
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "${NAME}@${VERSION} already on npm — skipping publish."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "${NAME}@${VERSION} not yet published — will publish."
+          fi
+
+      # No NODE_AUTH_TOKEN: authentication is via OIDC trusted publishing
+      # (configure datto-rmm-api-client's trusted publisher on npmjs.com).
+      # --access public because the package is unscoped/public.
+      - name: Publish to npm
+        if: steps.check.outputs.published == 'false'
+        run: npm publish --access public --provenance

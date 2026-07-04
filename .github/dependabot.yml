@@ -1,0 +1,36 @@
+# Dependabot configuration.
+#
+# datto-rmm-api-client publishes only `dist` + README + LICENSE, so dependency
+# updates are overwhelmingly dev/build tooling and transitive fixes. Grouping
+# collapses them into a small number of PRs per week instead of one PR per
+# dependency — each merge to main triggers a publish (see npm-publish.yml), so
+# fewer PRs means fewer version bumps and fewer publishes.
+#
+# No private-registry block is needed: this package and all its dependencies are
+# public on npmjs, so Dependabot resolves the manifest without auth.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # All dev/build tooling and transitive (indirect) updates land in one PR.
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      production-dependencies:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
