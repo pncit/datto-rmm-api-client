@@ -12,6 +12,13 @@ permissions:
 
 jobs:
   validate:
+    # SECURITY: this is a PUBLIC repo running on self-hosted runners, so a fork
+    # PR would otherwise execute untrusted code on our persistent runners (a
+    # "pwn request"). Restrict this job to same-repo branches — pushing a branch
+    # to this repo requires write access (PNC members) — so fork PRs skip it
+    # entirely. Pair with repo Settings → Actions → "Require approval for all
+    # outside collaborators" for platform-level enforcement.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted
     steps:
       # Env check: fail fast if the runner's Node/npm majors don't match
