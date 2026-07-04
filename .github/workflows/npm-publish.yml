@@ -78,4 +78,21 @@ jobs:
       # --access public because the package is unscoped/public.
       - name: Publish to npm
         if: steps.check.outputs.published == 'false'
-        run: npm publish --access public --provenance
+        shell: bash
+        run: |
+          set -uo pipefail
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm publish --access public --provenance; then
+            echo "Published ${NAME}@${VERSION}"
+          # npm can report failure *after* actually publishing: its internal
+          # retry re-sends the request and hits "cannot publish over previously
+          # published", failing the step even though the release went through.
+          # Re-check the registry and treat an existing version as success;
+          # only fail if the version is genuinely missing.
+          elif npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::${NAME}@${VERSION} already on npm — treating publish as successful."
+          else
+            echo "::error::Publish failed and ${NAME}@${VERSION} is not on npm."
+            exit 1
+          fi
