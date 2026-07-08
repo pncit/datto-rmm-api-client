@@ -368,6 +368,53 @@
       },
       "session_id": "9d6714fe-0cc3-4903-88ad-ec4ea8854643",
       "turn": "docs/implementation/full-api-surface/design-process-artifact.md"
+    },
+    {
+      "t": 1783553909,
+      "kind": "worker",
+      "agent": "planner",
+      "label": "planner Mode A",
+      "ok": true,
+      "started_at": "2026-07-08T23:29:36+00:00",
+      "duration_s": 532.4,
+      "api_duration_s": 516.1,
+      "turns": 36,
+      "models": [
+        "claude-haiku-4-5-20251001",
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 2.459,
+      "tokens": {
+        "input": 1310,
+        "output": 37763,
+        "cache_read": 768727,
+        "cache_creation": 109473
+      },
+      "session_id": "d313862c-3cd9-43e3-95b2-2720448e4d1c",
+      "turn": "docs/implementation/full-api-surface/plan.md"
+    },
+    {
+      "t": 1783554181,
+      "kind": "worker",
+      "agent": "plan-auditor",
+      "label": "plan:p1 plan-auditor r1",
+      "ok": true,
+      "started_at": "2026-07-08T23:38:29+00:00",
+      "duration_s": 272.2,
+      "api_duration_s": 250.9,
+      "turns": 18,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.5094,
+      "tokens": {
+        "input": 696,
+        "output": 17407,
+        "cache_read": 677459,
+        "cache_creation": 73201
+      },
+      "session_id": "722c415c-6edf-4a6a-bd02-a310e34f4bea",
+      "turn": "docs/implementation/full-api-surface/review-plan/plan-auditor-r1.md"
     }
   ],
   "invocation": {
