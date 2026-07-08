@@ -253,6 +253,121 @@
       },
       "session_id": "6eaa7470-b9f5-4459-b59e-83fdb5f9baef",
       "turn": "docs/implementation/full-api-surface/review-design/architect-r1.md"
+    },
+    {
+      "t": 1783553081,
+      "kind": "worker",
+      "agent": "design",
+      "label": "design:p2 reviser r5",
+      "ok": true,
+      "started_at": "2026-07-08T23:19:43+00:00",
+      "duration_s": 298.0,
+      "api_duration_s": 291.6,
+      "turns": 24,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.401,
+      "tokens": {
+        "input": 700,
+        "output": 23042,
+        "cache_read": 623653,
+        "cache_creation": 50959
+      },
+      "session_id": "9be6b676-d192-4b21-b19a-d2e127b447d2",
+      "turn": "docs/implementation/full-api-surface/review-design/reviser-r5.md"
+    },
+    {
+      "t": 1783553148,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "design:p2 engineer r2",
+      "ok": true,
+      "started_at": "2026-07-08T23:24:41+00:00",
+      "duration_s": 67.1,
+      "api_duration_s": 61.5,
+      "turns": 6,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.5447,
+      "tokens": {
+        "input": 18574,
+        "output": 4356,
+        "cache_read": 42647,
+        "cache_creation": 32164
+      },
+      "session_id": "c009a1a5-f70a-490b-8e19-45789dfeeb54",
+      "turn": "docs/implementation/full-api-surface/review-design/engineer-r2.md"
+    },
+    {
+      "t": 1783553164,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "design:p2 architect r2",
+      "ok": true,
+      "started_at": "2026-07-08T23:24:41+00:00",
+      "duration_s": 83.0,
+      "api_duration_s": 73.0,
+      "turns": 7,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.5914,
+      "tokens": {
+        "input": 18574,
+        "output": 5227,
+        "cache_read": 44394,
+        "cache_creation": 34565
+      },
+      "session_id": "22897eaa-63fb-4938-a38b-6dad4d22f01c",
+      "turn": "docs/implementation/full-api-surface/review-design/architect-r2.md"
+    },
+    {
+      "t": 1783553252,
+      "kind": "worker",
+      "agent": "process-historian",
+      "label": "design historian",
+      "ok": true,
+      "started_at": "2026-07-08T23:26:04+00:00",
+      "duration_s": 87.8,
+      "api_duration_s": 81.0,
+      "turns": 20,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.6045,
+      "tokens": {
+        "input": 2059,
+        "output": 5962,
+        "cache_read": 74974,
+        "cache_creation": 40768
+      },
+      "session_id": "57da08c6-6ed1-4679-9863-09c90ca9c80c",
+      "turn": "docs/implementation/full-api-surface/design-process-artifact.md"
+    },
+    {
+      "t": 1783553376,
+      "kind": "worker",
+      "agent": "process-historian",
+      "label": "design historian (retry)",
+      "ok": true,
+      "started_at": "2026-07-08T23:27:32+00:00",
+      "duration_s": 123.9,
+      "api_duration_s": 115.9,
+      "turns": 20,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.6965,
+      "tokens": {
+        "input": 684,
+        "output": 8065,
+        "cache_read": 147863,
+        "cache_creation": 41755
+      },
+      "session_id": "9d6714fe-0cc3-4903-88ad-ec4ea8854643",
+      "turn": "docs/implementation/full-api-surface/design-process-artifact.md"
     }
   ],
   "invocation": {
