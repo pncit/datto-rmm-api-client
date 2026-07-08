@@ -1,0 +1,10 @@
+## reviser — round 3
+
+Disposition of the two open findings in `design-auditor-r3.md`. Both are genuine, in-scope
+correctness gaps traceable to my earlier fixes (r1-f7 and r2-f2); each is `Fixed` by tightening the
+design against verified reference facts — no scope added.
+
+| ID | Disposition | Rationale |
+|----|-------------|-----------|
+| design-auditor-r3-f1 | Fixed | Real, verified defect the r1-f7 fix introduced. The reviewer checked the actual `fuze-api` repo (`git ls-files src/generated`, the explicit `.gitignore` note) and established that the reference **commits** `src/generated/**` — so R15's cited "fuze-api pattern" source was factually inverted, and the byte-for-byte `git diff` gate (Success Criteria + Verification) was vacuous while the directory was gitignored, since `git diff` never reports untracked files. Fixed by mirroring the reference: R15 now commits `src/generated/**` (patched spec stays an uncommitted transient intermediate), Migration step 2 commits generated output, and the Current State `fuze-api` reference records that its generated output is tracked because it derives from an external spec. The `git diff must be empty` check is now a real reproducibility gate and the R15 source claim is correct. Tightening only. |
+| design-auditor-r3-f2 | Fixed | Genuine feasibility gap the r2-f2 fix left open: the guaranteed widened response type (`EnumUnion \| (string & {})`) had no stated production path, since R4 emits public types from Orval's narrow axios/types target and R15 forbids hand-editing generated output, while the runtime widening lives only in dynamic `parseLenient`. Fixed by naming the mechanism in the leniency Key Concept — a deterministic post-generate Orval `transformer` on the types target that rewrites every response enum field to the widened form as part of `npm run generate`: generic and field-agnostic like `parseLenient`, applied once across generated output, reproducible under R15, never a hand-edit. One-sentence mechanism statement; no new scope. |
