@@ -1,0 +1,37 @@
+{
+  "rulings": {},
+  "events": [
+    {
+      "t": 1783551564,
+      "kind": "worker",
+      "agent": "design-auditor",
+      "label": "design:p1 design-auditor r1",
+      "ok": true,
+      "started_at": "2026-07-08T22:55:58+00:00",
+      "duration_s": 205.9,
+      "api_duration_s": 194.1,
+      "turns": 17,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.0305,
+      "tokens": {
+        "input": 686,
+        "output": 12816,
+        "cache_read": 272182,
+        "cache_creation": 57059
+      },
+      "session_id": "b9792a2a-338e-42cb-97ef-ed64b3914725",
+      "turn": "docs/implementation/full-api-surface/review-design/design-auditor-r1.md"
+    }
+  ],
+  "invocation": {
+    "argv": [
+      "/home/rob.gilbreath/.claude/pipeline/pipeline_dev",
+      "--autonomous",
+      "all",
+      "docs/implementation/full-api-surface/design.md"
+    ],
+    "cwd": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client"
+  }
+}
