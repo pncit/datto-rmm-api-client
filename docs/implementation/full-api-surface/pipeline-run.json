@@ -23,6 +23,52 @@
       },
       "session_id": "b9792a2a-338e-42cb-97ef-ed64b3914725",
       "turn": "docs/implementation/full-api-surface/review-design/design-auditor-r1.md"
+    },
+    {
+      "t": 1783551713,
+      "kind": "worker",
+      "agent": "design",
+      "label": "design:p1 reviser r1",
+      "ok": true,
+      "started_at": "2026-07-08T22:59:24+00:00",
+      "duration_s": 149.2,
+      "api_duration_s": 142.4,
+      "turns": 18,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.7638,
+      "tokens": {
+        "input": 702,
+        "output": 10029,
+        "cache_read": 418945,
+        "cache_creation": 30010
+      },
+      "session_id": "f88b8f03-9595-4a59-aeb7-5098a514b3df",
+      "turn": "docs/implementation/full-api-surface/review-design/reviser-r1.md"
+    },
+    {
+      "t": 1783551834,
+      "kind": "worker",
+      "agent": "design-auditor",
+      "label": "design:p1 design-auditor r2",
+      "ok": true,
+      "started_at": "2026-07-08T23:01:53+00:00",
+      "duration_s": 121.0,
+      "api_duration_s": 114.0,
+      "turns": 13,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.6353,
+      "tokens": {
+        "input": 680,
+        "output": 8087,
+        "cache_read": 63195,
+        "cache_creation": 39810
+      },
+      "session_id": "128d6070-f87d-4509-9b5d-f65deb7c9630",
+      "turn": "docs/implementation/full-api-surface/review-design/design-auditor-r2.md"
     }
   ],
   "invocation": {
