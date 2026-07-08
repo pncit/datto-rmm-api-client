@@ -85,7 +85,7 @@ share one mental model, one logger contract, and reusable validation patterns.
 | R12 | The client honors server **429 `Retry-After`** in backoff and surfaces **403 IP-block** as a clear error without auto-retry. | Functional | Rate-limit decision |
 | R13 | Config accepts an **optional injected logger whose interface mirrors fuze-api's `FuzeLogger`** — `debug/info/warn/error`, each `(message: string, meta?: Record<string, unknown>) => void`, validated by a zod schema and defaulting to a console-backed implementation. It is the sink for validation-leniency, rate-limit, and token diagnostics. | Functional | Logger decision — mirror fuze-api |
 | R14 | `userAgentExtra` sets a `User-Agent` header; `tokenRefreshPct` drives refresh timing; config fields that earn no keep (`autoRefresh`) are removed. | Functional | Dead-config decision |
-| R15 | The OpenAPI spec is committed (`spec/openapi.json` + `spec/openapi-prev.json` for diffing) **and so is `src/generated/**`** — mirroring `fuze-api`, which commits its generated output precisely because it derives from an external spec, so that a `git diff` of `src/generated/**` after regeneration is a real reproducibility gate rather than a no-op. The patched spec (`spec/openapi.patched.json`) is an **uncommitted transient intermediate** consumed by Orval en route. `npm run generate` runs the deterministic patch step then Orval, so re-running it reproduces `src/generated/**` byte-for-byte from the committed `spec/openapi.json`; generated output is never hand-edited, and a non-empty `git diff` of `src/generated/**` after regeneration is a build failure. | Non-functional | fuze-api pattern |
+| R15 | The OpenAPI spec is committed (`spec/openapi.json` + `spec/openapi-prev.json` for diffing) **and so is `src/generated/**`** — mirroring `fuze-api`, which commits its generated output precisely because it derives from an external spec, so that a `git diff` of `src/generated/**` after regeneration is a real reproducibility gate rather than a no-op. The patched spec (`spec/openapi.patched.json`) is an **uncommitted transient intermediate** consumed by Orval en route. `npm run generate` runs the deterministic patch step, then Orval, then a committed post-generate codemod (which widens response enum fields per R5), so re-running it reproduces `src/generated/**` byte-for-byte from the committed `spec/openapi.json`; generated output is never hand-edited, and a non-empty `git diff` of `src/generated/**` after regeneration is a build failure. | Non-functional | fuze-api pattern |
 | R16 | Build uses **tsup**; tests use **vitest + nock**; the package stays ESM-only, Node ≥ 20, publishing `dist` + types. | Non-functional | Convergence decision |
 | R17 | Generated + reconciled schemas are verified against **real captured response fixtures**. | Non-functional | Reality-data corpus |
 | R18 | A comprehensive public **README** documents install, auth setup, per-namespace usage, error handling, logger injection, validation leniency, and rate-limit config. | Functional | Stakeholder request |
@@ -255,12 +255,16 @@ BaseResource (get/post/patch/delete + validateRequest/Response/ArrayResponse)  �
   response side, logging the unseen value rather than failing the item). The corresponding emitted
   **response type** is widened the same way (`EnumUnion | (string & {})`) so the compile-time contract
   matches the runtime one — an unknown value is visible to callers, not hidden behind a falsely
-  exhaustive union. That widened type is produced by a **deterministic post-generate transformer**
-  wired into `npm run generate` (an Orval `transformer` on the types target) that rewrites every
-  response enum field to the widened `EnumUnion | (string & {})` form — the same generic,
-  field-agnostic move `parseLenient` makes at runtime, applied once across the generated output
-  rather than hand-edited per field, so it stays reproducible under R15 and never touches a
-  generated file by hand. Unknown keys are
+  exhaustive union. The `EnumUnion | (string & {})` "open-enum" idiom is TypeScript-only and has no
+  JSON-Schema representation, so it cannot come from an Orval spec-level hook (a spec enum widened
+  with a string collapses to plain `string`, losing the literal members). It is instead produced by a
+  **committed post-generate codemod** run as the second step of `npm run generate` — exactly the
+  pattern `fuze-api` establishes (`"generate": "orval && node scripts/dedupe-generated-index.mjs"`).
+  The codemod walks Orval's emitted types output and rewrites every response enum field to the widened
+  `EnumUnion | (string & {})` form — the same generic, field-agnostic move `parseLenient` makes at
+  runtime, applied once deterministically across the generated output rather than hand-edited per
+  field, so it stays reproducible under R15 (a script, not a hand-edit) and its output is re-derived
+  byte-for-byte on every regeneration. Unknown keys are
   stripped and logged; array items validate independently and drop-and-log on failure. Enum widening
   is deliberate: without it, per-item drop (R7) would silently discard any record carrying a
   future server enum value — re-creating the exact `rmmnetworkdevice` silent-data-loss failure the

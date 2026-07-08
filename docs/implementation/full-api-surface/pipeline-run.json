@@ -161,6 +161,98 @@
       },
       "session_id": "e2ca0516-86c0-4fd2-a79c-908506533d61",
       "turn": "docs/implementation/full-api-surface/review-design/design-auditor-r4.md"
+    },
+    {
+      "t": 1783552460,
+      "kind": "worker",
+      "agent": "design",
+      "label": "design:p1 reviser r4",
+      "ok": true,
+      "started_at": "2026-07-08T23:13:03+00:00",
+      "duration_s": 76.9,
+      "api_duration_s": 62.3,
+      "turns": 12,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.4998,
+      "tokens": {
+        "input": 684,
+        "output": 4590,
+        "cache_read": 177808,
+        "cache_creation": 29275
+      },
+      "session_id": "92541fd6-3f07-4a72-9232-9f83baa7aceb",
+      "turn": "docs/implementation/full-api-surface/review-design/reviser-r4.md"
+    },
+    {
+      "t": 1783552613,
+      "kind": "worker",
+      "agent": "design-auditor",
+      "label": "design:p1 design-auditor r5",
+      "ok": true,
+      "started_at": "2026-07-08T23:14:20+00:00",
+      "duration_s": 153.0,
+      "api_duration_s": 140.6,
+      "turns": 13,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.9021,
+      "tokens": {
+        "input": 23272,
+        "output": 9633,
+        "cache_read": 163379,
+        "cache_creation": 46321
+      },
+      "session_id": "2f77168c-d08c-4ee7-a97e-1be2af209167",
+      "turn": "docs/implementation/full-api-surface/review-design/design-auditor-r5.md"
+    },
+    {
+      "t": 1783552770,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "design:p2 engineer r1",
+      "ok": true,
+      "started_at": "2026-07-08T23:16:53+00:00",
+      "duration_s": 156.2,
+      "api_duration_s": 150.8,
+      "turns": 12,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.6958,
+      "tokens": {
+        "input": 1409,
+        "output": 7980,
+        "cache_read": 129656,
+        "cache_creation": 42439
+      },
+      "session_id": "cd9c8080-1c3e-451f-825d-e437b20a4d21",
+      "turn": "docs/implementation/full-api-surface/review-design/engineer-r1.md"
+    },
+    {
+      "t": 1783552783,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "design:p2 architect r1",
+      "ok": true,
+      "started_at": "2026-07-08T23:16:53+00:00",
+      "duration_s": 170.1,
+      "api_duration_s": 163.8,
+      "turns": 11,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.7075,
+      "tokens": {
+        "input": 680,
+        "output": 10443,
+        "cache_read": 108757,
+        "cache_creation": 38864
+      },
+      "session_id": "6eaa7470-b9f5-4459-b59e-83fdb5f9baef",
+      "turn": "docs/implementation/full-api-surface/review-design/architect-r1.md"
     }
   ],
   "invocation": {
