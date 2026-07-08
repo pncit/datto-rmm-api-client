@@ -507,6 +507,52 @@
       },
       "session_id": "0b235502-a8d7-404f-8ed6-03f7982dfde8",
       "turn": "docs/implementation/full-api-surface/review-plan/plan-auditor-r3.md"
+    },
+    {
+      "t": 1783555014,
+      "kind": "worker",
+      "agent": "planner",
+      "label": "plan:p1 reviser r3",
+      "ok": true,
+      "started_at": "2026-07-08T23:53:56+00:00",
+      "duration_s": 177.8,
+      "api_duration_s": 169.4,
+      "turns": 15,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.3155,
+      "tokens": {
+        "input": 18592,
+        "output": 12390,
+        "cache_read": 596639,
+        "cache_creation": 61449
+      },
+      "session_id": "894d0570-e417-4aeb-9d00-f82ce9b2ffc7",
+      "turn": "docs/implementation/full-api-surface/review-plan/reviser-r3.md"
+    },
+    {
+      "t": 1783555179,
+      "kind": "worker",
+      "agent": "plan-auditor",
+      "label": "plan:p1 plan-auditor r4",
+      "ok": true,
+      "started_at": "2026-07-08T23:56:54+00:00",
+      "duration_s": 164.6,
+      "api_duration_s": 159.8,
+      "turns": 11,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.0752,
+      "tokens": {
+        "input": 825,
+        "output": 11861,
+        "cache_read": 168803,
+        "cache_creation": 69013
+      },
+      "session_id": "cd17a6fe-f193-41a7-be5a-e6ae1db0ee5d",
+      "turn": "docs/implementation/full-api-surface/review-plan/plan-auditor-r4.md"
     }
   ],
   "invocation": {
