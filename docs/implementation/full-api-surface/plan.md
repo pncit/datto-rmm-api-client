@@ -53,7 +53,7 @@ Replace the `tsc`-build + `jest` toolchain with Orval codegen, `tsup` build, and
 ### Steps
 1. **Swap dependencies** in `package.json`:
    - Remove: `jest`, `ts-jest`, `@types/jest`.
-   - Add (devDependencies): `orval@^7`, `tsup@^8`, `vitest@^4`, `nock@^14`, `@vitest/coverage-v8@^4`, `@types/node@^22`.
+   - Add (devDependencies): `orval@^7`, `tsup@^8`, `vitest@^4`, `nock@^14`, `@vitest/coverage-v8@^4`, `@types/node@^26` (matching `fuze-api`, per the single-toolchain rationale).
    - Keep `zod@^4`, `axios@^1.10`, eslint/prettier stack.
    - Files: `package.json`
 2. **Rewrite scripts** in `package.json`:
@@ -125,9 +125,11 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+test ! -f jest.config.js                       # old jest config removed
+! grep -qE '"(jest|ts-jest|@types/jest)"' package.json   # no jest/ts-jest dep remains
+test -f orval.config.ts && test -f tsup.config.ts && test -f vitest.config.ts
+npx orval --help >/dev/null                     # binary installed (NOT run against a spec this phase)
 ```
-- `jest.config.js` is deleted and no `jest`/`ts-jest` reference remains in `package.json` (grep is clean).
-- `orval.config.ts`, `tsup.config.ts`, `vitest.config.ts` exist and `npx orval --help` resolves (binary installed) — note: `orval` is **not** run against a spec in this phase.
 
 ---
 
@@ -204,14 +206,14 @@ npm test
 ### Goal
 Port the `fuze-api` throwing error hierarchy and injectable structured logger as `Datto*`, add the UDF-masking logger decorator through which all client logging flows (R20), and define the new zod-validated `DattoRmmClientConfig` (R14). All new files; old `src/errors`-less surface untouched.
 
-**Requirements:** R9, R13, R14, R20, R10
+**Requirements:** R9, R13, R14, R20
 
 ### Steps
 1. **Error hierarchy** under `src/errors/` (port from `fuze-api`, rename): `base-error.ts` (`BaseError`, verbatim), `datto-api-error.ts` (`DattoApiError` — `statusCode`, `response`, `requestId`, plus a `retryAfterMs?` field for 429 and a `code?` for `'ip-block'` classification of 403; `static fromAxiosError`), `datto-validation-error.ts` (`DattoValidationError` — `zodError`, `stage: 'request'|'response'`, optional wire payload, `z.prettifyError` message, `getErrorTree`), `index.ts` barrel.
    - Files: `src/errors/base-error.ts`, `src/errors/datto-api-error.ts`, `src/errors/datto-validation-error.ts`, `src/errors/index.ts`
 2. **Logger** `src/logging/logger.ts`: `DattoLogger` type (`debug/info/warn/error`, each `(message: string, meta?: Record<string, unknown>) => void`), `dattoLoggerSchema` via `z.function` (mirror `fuzeLoggerSchema`), and a `consoleLogger` default backed by `console`.
    - Files: `src/logging/logger.ts`
-3. **UDF-masking decorator** `src/logging/mask.ts`: `withUdfMasking(logger: DattoLogger): DattoLogger` wraps all four methods; before delegating, it deep-walks each call's `meta` and replaces every **non-null** value under any key matching `/^udf\d+$/` (and inside a nested `udf` record) with `[redacted - N characters]` where `N` is the original string length. Null/absent UDFs pass through unchanged; surrounding structure is preserved so a redacted line stays diagnostically useful (R20). This is the single logger boundary — the client constructs `withUdfMasking(config.logger ?? consoleLogger)` once and hands that wrapped logger to every layer, so no call site can leak a raw UDF value.
+3. **UDF-masking decorator** `src/logging/mask.ts`: `withUdfMasking(logger: DattoLogger): DattoLogger` wraps all four methods; before delegating, it deep-walks each call's `meta` and replaces every **non-null** value under any key matching `/^udf\d+$/` (and inside a nested `udf` record) — **regardless of wire type** (string, number, or a nested object/array) — with `[redacted - N characters]` where `N` is the length of the value's string form (`String(v).length`, or its `JSON.stringify` length for objects/arrays). A non-string udf value is never passed through or recursed into unredacted. Null/absent UDFs pass through unchanged; surrounding structure is preserved so a redacted line stays diagnostically useful (R20). This is the single logger boundary — the client constructs `withUdfMasking(config.logger ?? consoleLogger)` once and hands that wrapped logger to every layer, so no call site can leak a raw UDF value.
    - Files: `src/logging/mask.ts`
 4. **Config** `src/client/datto-client-config.ts`: `dattoRmmClientConfigSchema = z.strictObject({...})` and `type DattoRmmClientConfig = z.infer<...>`:
    - `apiUrl` (`z.url()`), `apiKey`/`apiSecret` (`z.string().min(1)`).
@@ -225,7 +227,11 @@ Port the `fuze-api` throwing error hierarchy and injectable structured logger as
 ```ts
 // src/logging/mask.ts
 const UDF_KEY = /^udf\d+$/;
-const mask = (v: unknown) => (typeof v === 'string' ? `[redacted - ${v.length} characters]` : v);
+// redact ANY non-null udf value (string, number, object, array) — never pass a raw one through
+const mask = (v: unknown) => {
+  const s = typeof v === 'string' ? v : JSON.stringify(v) ?? String(v);
+  return `[redacted - ${s.length} characters]`;
+};
 function scrub(x: unknown): unknown {
   if (Array.isArray(x)) return x.map(scrub);
   if (x && typeof x === 'object') {
@@ -246,7 +252,7 @@ export function withUdfMasking(logger: DattoLogger): DattoLogger {
 
 ### Tests (in this phase)
 - `tests/unit/errors/*.test.ts`: `DattoApiError.fromAxiosError` maps status/response/requestId and preserves `retryAfterMs`/`code`; `DattoValidationError` carries `stage` and prettifies; both are `instanceof BaseError` and `instanceof Error`.
-- `tests/unit/logging/mask.test.ts` (proves R20): logging `{ udf: { udf1: 'S3CR3T', udf7: null }, udf5: 'abcd', host: 'PC1' }` yields `udf1='[redacted - 6 characters]'`, `udf7` stays `null`, `udf5='[redacted - 4 characters]'`, `host` unchanged; the underlying sink (a `vi.fn()`) never receives `'S3CR3T'` in any argument.
+- `tests/unit/logging/mask.test.ts` (proves R20): logging `{ udf: { udf1: 'S3CR3T', udf7: null }, udf5: 'abcd', udf9: { key: 'BitLockerRecoveryKey' }, host: 'PC1' }` yields `udf1='[redacted - 6 characters]'`, `udf7` stays `null`, `udf5='[redacted - 4 characters]'`, `udf9` redacted (its object value replaced by a `[redacted - N characters]` string, **not** passed through), `host` unchanged; the underlying sink (a `vi.fn()`) never receives `'S3CR3T'` or `'BitLockerRecoveryKey'` in any argument.
 - `tests/unit/logging/logger.test.ts`: `dattoLoggerSchema` accepts a valid logger and rejects a missing method.
 - `tests/unit/client/config.test.ts`: schema accepts a minimal valid config, rejects unknown keys (`.strict`), rejects bad `apiUrl`, and rejects `validationMode`/`autoRefresh` (proves they're gone).
 
@@ -323,7 +329,7 @@ Build the throwing HTTP layer the resources sit on: a dual-layer + per-operation
    - Files: `src/rate-limit/rate-limiter.ts`
 3. **HTTP transport** `src/http/http-client.ts` + finalize `src/http/axios-mutator.ts`: create the shared axios instance (`baseURL = apiUrl`, `User-Agent` = default + `userAgentExtra`, JSON headers). Add request handling that (a) calls `limiter.acquire(descriptor)` before send using a descriptor carried on the axios request config, (b) a response-error path that maps `AxiosError`→`DattoApiError` (via `fromAxiosError`), reads `Retry-After` on **429** into `retryAfterMs` and backs off/retries within `retry.maxAttempts` (port `fuze-api`'s exponential-backoff retry interceptor, adding the 429 `Retry-After` branch), and classifies **403** as `code:'ip-block'` and throws immediately with **no** retry (Non-Goal: no auto-recovery).
    - Files: `src/http/http-client.ts`, `src/http/axios-mutator.ts`
-4. **Auth** `src/auth/auth-manager.ts` + `src/auth/token-store.ts`: port `InMemoryTokenStore` (unchanged behavior, R10) and refactor `AuthManager` to **throw** on failure instead of returning `Result`. OAuth2 password grant to `{apiUrl}/auth/oauth/token`, HTTP basic `public-client:public`. Proactive refresh: refresh when the remaining lifetime is below `tokenRefreshPct` of the original TTL (default e.g. 25% if unset — pick and document a default), replacing the old fixed 60 s window. Expose the token via a request interceptor that sets `Authorization: Bearer <token>` on outgoing v2 requests.
+4. **Auth** `src/auth/auth-manager.ts` + `src/auth/token-store.ts`: port `InMemoryTokenStore` (unchanged behavior, R10) and refactor `AuthManager` to **throw** on failure instead of returning `Result`. OAuth2 password grant to `{apiUrl}/auth/oauth/token`, HTTP basic `public-client:public`. Proactive refresh: refresh when the remaining lifetime is below `tokenRefreshPct` of the original TTL, replacing the old fixed 60 s window. **Default `tokenRefreshPct = 25`** (refresh once <25% of the original TTL remains) when the config omits it — this exact number is the constant the auth-manager test asserts against, so refresh timing is deterministic across implementors. Export it as a named constant (`DEFAULT_TOKEN_REFRESH_PCT = 25`) so the config default and the test reference one source. Expose the token via a request interceptor that sets `Authorization: Bearer <token>` on outgoing v2 requests.
    - Files: `src/auth/auth-manager.ts`, `src/auth/token-store.ts`
 
 ### Opinionated Implementation Notes (Examples)
@@ -347,7 +353,7 @@ if (status === 403) {
 ### Tests (in this phase, all via `nock` — no live calls)
 - `tests/unit/rate-limit/rate-limiter.test.ts`: a burst of 101 `alert-resolve` writes trips the per-op 100 window while a burst of `device-udf-set` up to 600 does not; reads and writes are counted in separate windows; an unlisted write opKey falls back to 100.
 - `tests/unit/http/http-client.test.ts` (nock): a 429 with `Retry-After: 1` is honored (retried after the delay, `retryAfterMs` populated); a 403 throws `DattoApiError` with `code:'ip-block'` and is **not** retried; a 5xx retries per `maxAttempts`; a 2xx returns the body.
-- `tests/unit/auth/auth-manager.test.ts` (nock): password-grant token is cached and reused; a token past the `tokenRefreshPct` threshold triggers a proactive refresh; a failed grant throws `DattoApiError`.
+- `tests/unit/auth/auth-manager.test.ts` (nock): password-grant token is cached and reused; with `tokenRefreshPct` unset, a token whose remaining lifetime has fallen below the pinned 25% default (`DEFAULT_TOKEN_REFRESH_PCT`) triggers a proactive refresh while a token above it does not; a failed grant throws `DattoApiError`.
 
 ### Documentation (if needed)
 - None yet.
@@ -364,12 +370,12 @@ npm test
 ## Phase 6: BaseResource, strict pagination, and the schema-override module
 
 ### Goal
-Provide the validated HTTP primitives every resource extends (`get/post/patch/deleteRequest`, `validateRequest`/`validateResponse`/`validateArrayResponse`) plus a `paginate` helper that walks `pageDetails.nextPageUrl` — validating each page's named array leniently and each page's cursor **strictly** against a dedicated `pageDetails` override (a missing/malformed cursor **throws**; a `null` `nextPageUrl` is the normal terminal). Add the hand-maintained `src/spec-overrides/` module that reconciles UDFs, alert context, the pagination cursor, and required-field marks for the write set.
+Provide the validated HTTP primitives every resource extends (`httpGet`/`httpPost`/`httpPatch`/`httpDelete` — renamed from fuze-api's `get`/`post`/`patch`/`deleteRequest` to avoid colliding with public resource methods like `devices.get`, `validateRequest`/`validateResponse`/`validateArrayResponse`) plus a `paginate` helper that walks `pageDetails.nextPageUrl` — validating each page's named array leniently and each page's cursor **strictly** against a dedicated `pageDetails` override (a missing/malformed cursor **throws**; a `null` `nextPageUrl` is the normal terminal). Add the hand-maintained `src/spec-overrides/` module that reconciles UDFs, alert context, the pagination cursor, and required-field marks for the write set.
 
 **Requirements:** R3, R6, R8
 
 ### Steps
-1. **BaseResource** `src/client/resources/base-resource.ts`: port from `fuze-api`, rename error type to `DattoValidationError`, thread the injected (masked) `DattoLogger` and the shared axios instance. Keep `coerceSchema`, `validateRequest` (strict, throws), `validateResponse` (lenient via `parseLenient`, throws), `validateArrayResponse` (per-item drop + `warn` log). Each primitive attaches a `RateDescriptor` to the axios config: `get` → `{kind:'read'}`, and `post/patch/deleteRequest` accept an `opKey` argument → `{kind:'write', opKey}`.
+1. **BaseResource** `src/client/resources/base-resource.ts`: port from `fuze-api`, rename error type to `DattoValidationError`, thread the injected (masked) `DattoLogger` and the shared axios instance. Keep `coerceSchema`, `validateRequest` (strict, throws), `validateResponse` (lenient via `parseLenient`, throws), `validateArrayResponse` (per-item drop + `warn` log). **Rename the protected HTTP primitives** to `httpGet`/`httpPost`/`httpPatch`/`httpDelete` (fuze-api's are `get`/`post`/`patch`/`deleteRequest`) so a resource subclass can expose a public `get(uid)`/`resolve(uid)`/etc. without shadowing a base method — a resource method reusing a primitive name (`get`) would redeclare it with an incompatible signature (TS2416) and its body would recurse into itself. Each primitive attaches a `RateDescriptor` to the axios config: `httpGet` → `{kind:'read'}`, and `httpPost/httpPatch/httpDelete` accept an `opKey` argument → `{kind:'write', opKey}`. **Rule:** resource classes call only the `http*` primitives, never a same-named method.
    - Files: `src/client/resources/base-resource.ts`
 2. **`paginate` helper** on `BaseResource`: given a start path, params, the page's named-array key + item schema, walk `pageDetails.nextPageUrl` accumulating items. Per page: validate the **cursor** with the strict `pageDetailsSchema` override (`.safeParse`; on failure **throw** `DattoValidationError('response')` — this is the R3 hard-fail, never a silent truncation) and validate the named array with `validateArrayResponse` (lenient, per-item drop). `null` `nextPageUrl` ends the walk normally. Leniency governs item payloads, never the walk cursor.
    - Files: `src/client/resources/base-resource.ts`
@@ -436,12 +442,13 @@ Implement the first five `*Resource` classes over `BaseResource`, each exposing 
 ### Opinionated Implementation Notes (Examples)
 ```ts
 export class DeviceResource extends BaseResource {
+  // Public `get` is safe: the base HTTP primitive is `httpGet`, so no shadowing / recursion.
   get(uid: string): Promise<Device> {
-    return this.get(`/api/v2/device/${uid}`, deviceResponseSchema, 'GET /device/{uid}');
+    return this.httpGet(`/api/v2/device/${uid}`, deviceResponseSchema, 'GET /device/{uid}');
   }
   setUdf(uid: string, udf: DeviceUdfInput): Promise<void> {
-    return this.post(`/api/v2/device/${uid}/udf`, udf, udfWriteBodySchema, z.void(),
-                     'POST /device/{uid}/udf', 'device-udf-set'); // opKey → 600 write window
+    return this.httpPost(`/api/v2/device/${uid}/udf`, udf, udfWriteBodySchema, z.void(),
+                         'POST /device/{uid}/udf', 'device-udf-set'); // opKey → 600 write window
   }
 }
 ```
@@ -494,7 +501,7 @@ export * from './generated/types';
 ### Tests (in this phase, nock)
 - One test file per new resource (as in Phase 7).
 - `tests/unit/client/surface.test.ts`: all ten namespaces exist on a constructed client; `createDattoRmmClient` throws `DattoValidationError` on invalid config; the retired names (`getAccountDevices`, `getDeviceByUid`, `updateDeviceUdfs`, `Result`, `ProblemError`) are **not** exported (import assertions / type-level check).
-- `tests/unit/client/coverage-map.test.ts`: enumerate the ten namespaces' methods and assert the count reaches the full operation set (guards R1 — no path silently missing).
+- `tests/unit/client/coverage-map.test.ts`: derive the **authoritative** operation inventory from the committed `spec/openapi.json` (enumerate every `paths[path][method]`, keyed by `operationId` or `method+path`), and assert that a maintained `client.<ns>.<method>` → `{ method, path }` mapping table (declared in the test or a small committed `src/client/operation-map.ts`) covers **every** spec operation exactly once — no spec operation unmapped, no duplicate/omission slipping past a raw total. A bare count is insufficient because it passes when a namespace duplicates one operation and omits another. This is the real R1 guard; the coverage table is updated whenever the spec is refreshed.
 
 ### Documentation (if needed)
 - None yet (README is Phase 10) — but keep JSDoc on each public method.
@@ -505,9 +512,13 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+! git grep -qn "Result<" -- src/            # Result contract fully removed
+! git grep -qn "validationMode" -- src/     # three-mode config fully removed
+for f in src/client.ts src/config.ts src/logger.ts src/result.ts src/validation.ts \
+         src/schemas.ts src/httpClient.ts src/auth.ts src/rateLimiter.ts src/tokenStore.ts; do \
+  test ! -e "$f" || { echo "old surface still present: $f"; exit 1; }; done
+test ! -d src/internal
 ```
-- `git grep -n "Result<" src/` and `git grep -n "validationMode" src/` return nothing (old contract fully removed).
-- No file under the deleted list remains.
 
 ---
 
@@ -556,7 +567,7 @@ npm run typecheck
 npm test
 node scripts/scan-secrets.mjs
 ```
-- `node scripts/scan-secrets.mjs` exits 0 (no secret-shaped values tracked) and is proven to exit non-zero on a planted secret (covered by its unit test).
+- The fenced block enforces both halves: `node scripts/scan-secrets.mjs` exits 0 (no secret-shaped values tracked), and the "exits non-zero on a planted secret" guarantee is asserted by `tests/unit/scripts/scan-secrets.test.ts`, which runs under `npm test` above.
 
 ---
 
