@@ -148,7 +148,8 @@ Commit Datto's OpenAPI spec, add the deterministic patch step and the response-e
    - **Timestamps `string`→`integer`** (epoch-ms): retype the known timestamp properties across component schemas — `Device.lastSeen/lastReboot/lastAuditDate/creationDate`, `AuthUser.created/lastAccess`, `Alert.timestamp/resolvedOn` (drive from a documented list constant, not a global rename).
    - **`Alert.alertContext`** → a permissive open object `{ type:'object', properties:{ '@class':{ type:'string' } }, additionalProperties:true }` (captures the Jackson `@class` discriminator; the spec's ~30 dead `*Context` schemas are left in place but no longer referenced by `alertContext`).
    - Files: `scripts/patch-spec.mjs`
-3. **Write the response-enum-widening codemod** `scripts/widen-response-enums.mjs`: after Orval runs, rewrite every **response** enum field so its emitted TypeScript type is the open form `EnumUnion | (string & {})` (R5), deterministically across `src/generated/`. This idiom has no JSON-Schema representation, so it must be a post-generate script, not an Orval hook. Scope strictly to response types (never request/param/body types, which stay closed). Keep the transform idempotent (running twice is a no-op) so reproducibility holds.
+3. **Write the response-enum-widening codemod** `scripts/widen-response-enums.mjs`: after Orval runs, rewrite every **response** enum field so its emitted TypeScript type is the open form `EnumUnion | (string & {})` (R5), deterministically across `src/generated/`. This idiom has no JSON-Schema representation, so it must be a post-generate script, not an Orval hook. Keep the transform idempotent (running twice is a no-op) so reproducibility holds.
+   - **Concrete response-vs-request discrimination rule** (this is the whole correctness of the codemod): the codemod scans **only `src/generated/types/**`** and widens enum unions **only inside exported type/interface declarations whose type name does *not* end in one of Orval's request-side suffixes** — `Body`, `Params`, `Parameter`, `Parameters`, `Query`, `QueryParams`, `Header`, `Headers`, `PathParameters`. Every other exported model type in `types/**` is a component-schema/response DTO (`Device`, `Alert`, `AuthUser`, the `*200`/response envelopes) and its enums are widened. Because Datto's write bodies are distinct small `*Body` types (no shared component-schema is used as a request body), scoping by this suffix set keeps request/param/body enums **closed** while widening response enums. The suffix list is a documented constant at the top of the script; if a future Orval version changes request-type naming, this one constant is the single point to update.
    - Files: `scripts/widen-response-enums.mjs`
    - Notes: Runtime enum *degradation* is a separate mechanism handled in Phase 4's `parseLenient`; this codemod only widens the compile-time type. Phase 9 asserts the two stay aligned on the same field set.
 4. **Generate and commit** `src/generated/**`: run `npm run generate`; commit the output. Add the `.gitignore` note (copy `fuze-api`'s wording) that `src/generated/` is intentionally committed because it derives from an external spec, and that `spec/openapi.patched.json` is ignored.
@@ -183,7 +184,7 @@ writeFileSync('spec/openapi.patched.json', JSON.stringify(spec, null, 2) + '\n')
 ### Tests (in this phase)
 - `tests/generated/reproducibility.test.ts`: shells out to `npm run generate` and asserts `git diff --quiet -- src/generated` (guards R15 in CI). Skip cleanly with a clear message if `spec/openapi.json` is absent.
 - `tests/generated/patch-spec.test.ts`: unit-test `patch-spec.mjs` against a tiny inline spec fragment — timestamp fields become `integer`, `alertContext` becomes the permissive object. (No network.)
-- `tests/generated/widen-enums.test.ts`: unit-test the codemod against a fixture string containing one response enum + one request enum; assert only the response enum gains `| (string & {})` and that a second pass is a no-op.
+- `tests/generated/widen-enums.test.ts`: unit-test the codemod against a fixture string containing an enum in a component-schema type (e.g. `Device.deviceClass`), an enum in a `*Body` type, and an enum in a `*Params` type; assert **only** the component-schema (response) enum gains `| (string & {})` while the `*Body`/`*Params` enums stay closed (guards the over-widen risk that would silently loosen the request-side type contract), and that a second pass is a no-op.
 
 ### Documentation (if needed)
 - None yet.
@@ -195,6 +196,11 @@ git diff --exit-code -- src/generated
 npm run typecheck
 npm run lint
 npm test
+git ls-files --error-unmatch spec/openapi.json spec/openapi-prev.json   # both spec files committed
+! git ls-files --error-unmatch spec/openapi.patched.json 2>/dev/null     # patched spec NOT tracked
+grep -qE 'openapi\.patched\.json' .gitignore                             # patched spec git-ignored
+test -n "$(ls -A src/generated)"                                         # generated output committed & non-empty
+ls src/generated/schemas/*/*.zod.ts >/dev/null && test -d src/generated/types
 ```
 - `spec/openapi.json` and `spec/openapi-prev.json` are committed; `spec/openapi.patched.json` is git-ignored and untracked.
 - `src/generated/**` is committed and non-empty (contains `schemas/*/*.zod.ts` and `types/`).
@@ -218,8 +224,9 @@ Port the `fuze-api` throwing error hierarchy and injectable structured logger as
 4. **Config** `src/client/datto-client-config.ts`: `dattoRmmClientConfigSchema = z.strictObject({...})` and `type DattoRmmClientConfig = z.infer<...>`:
    - `apiUrl` (`z.url()`), `apiKey`/`apiSecret` (`z.string().min(1)`).
    - `logger?` (`dattoLoggerSchema.optional()`), `userAgentExtra?` (`z.string().optional()` — now functional, sets a `User-Agent` header suffix in Phase 5), `tokenRefreshPct?` (`z.number().min(0).max(100).optional()` — now drives refresh timing in Phase 5).
-   - `rateLimit?`, `retry?` (strict sub-objects), `axiosInstance?` (opaque, `z.custom` or `z.unknown`).
-   - **Removed vs 0.1.x:** `autoRefresh`, `validationMode` (do not carry forward).
+   - `retry?` — a **strict sub-object** with a pinned shape and defaults: `z.strictObject({ maxAttempts: z.number().int().min(1).optional(), baseDelayMs: z.number().int().min(0).optional(), maxDelayMs: z.number().int().min(0).optional() }).optional()`. Export the defaults as named constants **`DEFAULT_RETRY = { maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 5000 }`** from this file so the Phase 5 http-client (and its test) reference one source; retry count and exponential-backoff timing are therefore deterministic across implementors (the same fix pattern as `DEFAULT_TOKEN_REFRESH_PCT`).
+   - `rateLimit?` — a **strict sub-object** that only **overrides** the committed `src/rate-limit/rate-limits.ts` table; it does not replace it. Overridable fields: `z.strictObject({ readLimit: z.number().int().min(1).optional(), writeAggregateLimit: z.number().int().min(1).optional(), windowSeconds: z.number().int().min(1).optional(), defaultWriteLimit: z.number().int().min(1).optional() }).optional()`. Unset fields fall back to the table's exported constants (`READ_LIMIT`, `WRITE_AGGREGATE_LIMIT`, `WINDOW_SECONDS`, `DEFAULT_WRITE_LIMIT`).
+   - **Removed vs 0.1.x:** `autoRefresh`, `validationMode` (do not carry forward). **No `axiosInstance` field** — the client always constructs its own axios instance (Phase 5) so auth/rate-limit/retry interceptors are guaranteed to be wired; a caller-supplied instance is deliberately not accepted (avoids re-introducing a dead/unwired config knob, per R14).
    - Files: `src/client/datto-client-config.ts`
    - Notes: the client constructor `.safeParse`s config and throws `DattoValidationError(err, 'request')` on failure (wired in Phase 8), exactly as `FuzeClient` does.
 
@@ -327,7 +334,7 @@ Build the throwing HTTP layer the resources sit on: a dual-layer + per-operation
    - Files: `src/rate-limit/rate-limits.ts`
 2. **Dual-layer limiter** `src/rate-limit/rate-limiter.ts`: a `MultiWindowRateLimiter` holding a read sliding window (600/60 s), an aggregate-write window (600/60 s), and a lazily-created per-opKey write window map. `acquire(descriptor: { kind: 'read' | 'write'; opKey?: string })` enforces the tightest applicable set: reads consult the read window; writes consult **both** the aggregate-write window **and** the op-key window (`opKey` limit from the table, else `DEFAULT_WRITE_LIMIT`). Preserve the old `SlidingWindowRateLimiter` semantics per window.
    - Files: `src/rate-limit/rate-limiter.ts`
-3. **HTTP transport** `src/http/http-client.ts` + finalize `src/http/axios-mutator.ts`: create the shared axios instance (`baseURL = apiUrl`, `User-Agent` = default + `userAgentExtra`, JSON headers). Add request handling that (a) calls `limiter.acquire(descriptor)` before send using a descriptor carried on the axios request config, (b) a response-error path that maps `AxiosError`→`DattoApiError` (via `fromAxiosError`), reads `Retry-After` on **429** into `retryAfterMs` and backs off/retries within `retry.maxAttempts` (port `fuze-api`'s exponential-backoff retry interceptor, adding the 429 `Retry-After` branch), and classifies **403** as `code:'ip-block'` and throws immediately with **no** retry (Non-Goal: no auto-recovery).
+3. **HTTP transport** `src/http/http-client.ts` + finalize `src/http/axios-mutator.ts`: create the shared axios instance (`baseURL = apiUrl`, `User-Agent` = default + `userAgentExtra`, JSON headers). Add request handling that (a) calls `limiter.acquire(descriptor)` before send using a descriptor carried on the axios request config, (b) a response-error path that maps `AxiosError`→`DattoApiError` (via `fromAxiosError`), reads `Retry-After` on **429** into `retryAfterMs` and backs off/retries within `retry.maxAttempts ?? DEFAULT_RETRY.maxAttempts`, with exponential backoff bounded by `retry.baseDelayMs ?? DEFAULT_RETRY.baseDelayMs` and `retry.maxDelayMs ?? DEFAULT_RETRY.maxDelayMs` (port `fuze-api`'s exponential-backoff retry interceptor, adding the 429 `Retry-After` branch), and classifies **403** as `code:'ip-block'` and throws immediately with **no** retry (Non-Goal: no auto-recovery).
    - Files: `src/http/http-client.ts`, `src/http/axios-mutator.ts`
 4. **Auth** `src/auth/auth-manager.ts` + `src/auth/token-store.ts`: port `InMemoryTokenStore` (unchanged behavior, R10) and refactor `AuthManager` to **throw** on failure instead of returning `Result`. OAuth2 password grant to `{apiUrl}/auth/oauth/token`, HTTP basic `public-client:public`. Proactive refresh: refresh when the remaining lifetime is below `tokenRefreshPct` of the original TTL, replacing the old fixed 60 s window. **Default `tokenRefreshPct = 25`** (refresh once <25% of the original TTL remains) when the config omits it — this exact number is the constant the auth-manager test asserts against, so refresh timing is deterministic across implementors. Export it as a named constant (`DEFAULT_TOKEN_REFRESH_PCT = 25`) so the config default and the test reference one source. Expose the token via a request interceptor that sets `Authorization: Bearer <token>` on outgoing v2 requests.
    - Files: `src/auth/auth-manager.ts`, `src/auth/token-store.ts`
@@ -352,7 +359,7 @@ if (status === 403) {
 
 ### Tests (in this phase, all via `nock` — no live calls)
 - `tests/unit/rate-limit/rate-limiter.test.ts`: a burst of 101 `alert-resolve` writes trips the per-op 100 window while a burst of `device-udf-set` up to 600 does not; reads and writes are counted in separate windows; an unlisted write opKey falls back to 100.
-- `tests/unit/http/http-client.test.ts` (nock): a 429 with `Retry-After: 1` is honored (retried after the delay, `retryAfterMs` populated); a 403 throws `DattoApiError` with `code:'ip-block'` and is **not** retried; a 5xx retries per `maxAttempts`; a 2xx returns the body.
+- `tests/unit/http/http-client.test.ts` (nock): a 429 with `Retry-After: 1` is honored (retried after the delay, `retryAfterMs` populated); a 403 throws `DattoApiError` with `code:'ip-block'` and is **not** retried; a 5xx retries exactly `DEFAULT_RETRY.maxAttempts` times (asserted against the imported constant, not a magic number) with backoff bounded by `DEFAULT_RETRY.baseDelayMs`/`maxDelayMs`; a 2xx returns the body. A config with an explicit `retry.maxAttempts` override is honored over the default.
 - `tests/unit/auth/auth-manager.test.ts` (nock): password-grant token is cached and reused; with `tokenRefreshPct` unset, a token whose remaining lifetime has fallen below the pinned 25% default (`DEFAULT_TOKEN_REFRESH_PCT`) triggers a proactive refresh while a token above it does not; a failed grant throws `DattoApiError`.
 
 ### Documentation (if needed)
@@ -600,8 +607,9 @@ npm run typecheck
 npm test
 npm run build
 node -e "const p=require('./package.json'); if(p.version!=='1.0.0') process.exit(1); if(p.type!=='module') process.exit(1);"
+test -f dist/index.js && test -f dist/index.d.ts    # publishable ESM + types emitted
 ```
-- `README.md` contains the namespace→endpoint map (all ten namespaces), the error-handling section, the logger/masking section, the leniency section, the rate-limit section, and the `0.1.x → 1.0.0` upgrade guide.
+- `README.md` contains the namespace→endpoint map (all ten namespaces), the error-handling section, the logger/masking section, the leniency section, the rate-limit section, and the `0.1.x → 1.0.0` upgrade guide (the `readme.test.ts` under `npm test` guards the namespace-map rows and the error/masking mentions).
 - `dist/index.js` and `dist/index.d.ts` exist after `npm run build`.
 
 ---
