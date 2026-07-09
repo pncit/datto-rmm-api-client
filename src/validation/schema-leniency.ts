@@ -71,6 +71,34 @@ function objectShape(schema: z.ZodType): Record<string, z.ZodType> {
 }
 
 /**
+ * A named object schema's own **meaningful** `.catchall(...)` value schema, if one was declared —
+ * `undefined` for a plain `z.object()` with none, and (critically) also `undefined` for
+ * `z.strictObject()`. Zod v4 gives every object node a `_zod.def.catchall`, alongside `.shape`
+ * (see {@link objectShape}) — but `z.strictObject()`'s is a `ZodNever` (`.catchall(z.never())`
+ * under the hood, confirmed directly against zod v4's runtime `_zod.def`), which *means* "no
+ * extra key is ever valid here," the opposite of "preserve an extra key." Treating a `never`
+ * catchall as meaningful would silently start preserving unknown keys on every one of this
+ * project's `zod.strictObject(...)` write-body schemas (`src/generated/schemas/**`) — those
+ * never reach this function today (request validation runs plain `.safeParse`, not
+ * `parseLenient`), but the helper is still named and typed to be correct standalone, not correct
+ * only by the accident of its current one caller. A real, hand-declared `.catchall(z.unknown())`
+ * (or any other non-`never` value schema) is the only case this returns non-`undefined` for.
+ *
+ * Consulted only by {@link cleanAndDiagnoseResponse}'s `'object'` case, over the *original*
+ * (un-widened) schema a resource actually declared — e.g. `alertContextSchema`/`pageDetailsSchema`
+ * (`src/schema-overrides/**`), each hand-written with an explicit `.catchall(z.unknown())` so a
+ * real, undocumented extra key (a `@class`-specific alert-context field; a future benign
+ * `pageDetails` addition) is accepted rather than rejected. `addCatchallRecursive` already forces
+ * *every* object node's *wrapped* (permissive-parse) copy to carry `.catchall(z.unknown())`
+ * regardless of what the original declared, purely so `.safeParse` cannot fail on an unknown key
+ * — that wrapped copy is never what this function reads.
+ */
+function objectCatchall(schema: z.ZodType): z.ZodType | undefined {
+  const catchall = (schema as any)._zod.def.catchall as z.ZodType | undefined;
+  return catchall && getDef(catchall).type !== "never" ? catchall : undefined;
+}
+
+/**
  * The child schema(s) (and any other per-kind payload) each recognized `_zod.def` node kind
  * carries, keyed by kind-specific slot name — `undefined` slots simply don't apply to whichever
  * kind was passed in. This is the single place the zod-internal property name that holds each
@@ -354,6 +382,7 @@ function cleanAndDiagnoseResponse(
 
       const shape = objectShape(schema);
       const shapeKeys = new Set(Object.keys(shape));
+      const catchall = objectCatchall(schema);
       const parsedRecord = parsed as Record<string, unknown>;
       const parsedKeys = Object.keys(parsedRecord);
       const cleaned: Record<string, unknown> = {};
@@ -363,6 +392,21 @@ function cleanAndDiagnoseResponse(
           cleaned[key] = cleanAndDiagnoseResponse(
             parsedRecord[key],
             shape[key]!,
+            path ? `${path}.${key}` : key,
+            diagnostics,
+            collectionKey,
+          );
+        } else if (catchall) {
+          // The *original* schema declared its own `.catchall(...)` (e.g. `alertContextSchema`,
+          // `pageDetailsSchema` — src/schema-overrides/**) — an explicit, hand-written signal
+          // that an undocumented extra key here is expected and meaningful, not noise. Keep it
+          // (recursively cleaned against the catchall's own value schema) rather than stripping
+          // it as if it were unknown; this is what actually delivers R8's "an alert's real
+          // context fields survive validation" guarantee end-to-end through `parseLenient`, not
+          // just through the catchall schema's own un-cleaned `.safeParse`.
+          cleaned[key] = cleanAndDiagnoseResponse(
+            parsedRecord[key],
+            catchall,
             path ? `${path}.${key}` : key,
             diagnostics,
             collectionKey,

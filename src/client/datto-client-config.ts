@@ -80,8 +80,9 @@ export const dattoRmmClientConfigSchema = z.strictObject({
 });
 
 /**
- * Configuration for {@link DattoRmmClient} (wired in Phase 8). Type is inferred
- * directly from {@link dattoRmmClientConfigSchema} to keep a single source of truth.
+ * Configuration for {@link DattoRmmClient} (`../client/datto-rmm-client.ts`, wired in Phase 7).
+ * Type is inferred directly from {@link dattoRmmClientConfigSchema} to keep a single source of
+ * truth.
  *
  * @example
  * ```typescript
