@@ -925,6 +925,98 @@
       },
       "session_id": "18349dcc-09a4-4c72-9a61-21c75c5e1ff7",
       "turn": "docs/implementation/full-api-surface/review-plan/plan-auditor-r5.md"
+    },
+    {
+      "t": 1783568856,
+      "kind": "worker",
+      "agent": "planner",
+      "label": "plan:p1 reviser r5",
+      "ok": true,
+      "started_at": "2026-07-09T03:44:41+00:00",
+      "duration_s": 175.3,
+      "api_duration_s": 150.8,
+      "turns": 27,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.8179,
+      "tokens": {
+        "input": 712,
+        "output": 9674,
+        "cache_read": 479551,
+        "cache_creation": 33273
+      },
+      "session_id": "c6d28a43-cc36-4911-afbb-a2cdc2a6b147",
+      "turn": "docs/implementation/full-api-surface/review-plan/reviser-r5.md"
+    },
+    {
+      "t": 1783568965,
+      "kind": "worker",
+      "agent": "plan-auditor",
+      "label": "plan:p1 plan-auditor r6",
+      "ok": true,
+      "started_at": "2026-07-09T03:47:36+00:00",
+      "duration_s": 109.0,
+      "api_duration_s": 98.0,
+      "turns": 16,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.8862,
+      "tokens": {
+        "input": 839,
+        "output": 6538,
+        "cache_read": 333439,
+        "cache_creation": 55180
+      },
+      "session_id": "45266295-0a5d-451e-886a-d9fbb5c7ce18",
+      "turn": "docs/implementation/full-api-surface/review-plan/plan-auditor-r6.md"
+    },
+    {
+      "t": 1783569211,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "plan:p2 architect r1",
+      "ok": true,
+      "started_at": "2026-07-09T03:49:25+00:00",
+      "duration_s": 245.6,
+      "api_duration_s": 232.3,
+      "turns": 18,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.3742,
+      "tokens": {
+        "input": 833,
+        "output": 15781,
+        "cache_read": 385825,
+        "cache_creation": 78260
+      },
+      "session_id": "6976e067-ca45-43e7-93fb-7c5e3d9c5bce",
+      "turn": "docs/implementation/full-api-surface/review-plan/architect-r1.md"
+    },
+    {
+      "t": 1783569321,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "plan:p2 engineer r1",
+      "ok": true,
+      "started_at": "2026-07-09T03:49:25+00:00",
+      "duration_s": 355.8,
+      "api_duration_s": 346.6,
+      "turns": 13,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.653,
+      "tokens": {
+        "input": 19541,
+        "output": 23577,
+        "cache_read": 316407,
+        "cache_creation": 80767
+      },
+      "session_id": "9d5ca9ea-900b-4f36-a2bd-2576ddaafb64",
+      "turn": "docs/implementation/full-api-surface/review-plan/engineer-r1.md"
     }
   ],
   "invocation": {
