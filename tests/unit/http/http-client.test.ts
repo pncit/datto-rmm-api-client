@@ -196,6 +196,46 @@ describe("createHttpClient", () => {
     expect(elapsedMs).toBeGreaterThanOrEqual(expectedMinDelay - 50);
   });
 
+  it("clamps exponential backoff at retry.maxDelayMs instead of growing unbounded", async () => {
+    const scope = nock(BASE_URL)
+      .get("/foo")
+      .times(3)
+      .reply(503, { message: "unavailable" });
+
+    const start = Date.now();
+    const error = await client({
+      retry: { maxAttempts: 3, baseDelayMs: 200, maxDelayMs: 250 },
+    })
+      .get("/foo", { rateDescriptor: { kind: "read" } })
+      .catch((e: unknown) => e);
+    const elapsedMs = Date.now() - start;
+
+    expect(error).toBeInstanceOf(DattoApiError);
+    expect((error as DattoApiError).statusCode).toBe(503);
+    expect(scope.isDone()).toBe(true);
+
+    // Uncapped delays would be 200ms + 400ms = 600ms; the second retry's delay must be
+    // clamped to maxDelayMs (250ms), for a clamped total of 200ms + 250ms = 450ms.
+    expect(elapsedMs).toBeGreaterThanOrEqual(450 - 50);
+    expect(elapsedMs).toBeLessThan(550);
+  });
+
+  it("throws DattoApiError with retryAfterMs when 429 retries are exhausted", async () => {
+    const scope = nock(BASE_URL)
+      .get("/foo")
+      .times(DEFAULT_RETRY.maxAttempts)
+      .reply(429, { message: "slow down" }, { "Retry-After": "0" });
+
+    const error = await client()
+      .get("/foo", { rateDescriptor: { kind: "read" } })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DattoApiError);
+    expect((error as DattoApiError).statusCode).toBe(429);
+    expect((error as DattoApiError).retryAfterMs).toBe(0);
+    expect(scope.isDone()).toBe(true);
+  });
+
   it("honors an explicit retry.maxAttempts override over the default", async () => {
     const scope = nock(BASE_URL)
       .get("/foo")

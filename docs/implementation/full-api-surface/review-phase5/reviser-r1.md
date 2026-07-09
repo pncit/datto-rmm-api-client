@@ -1,0 +1,6 @@
+## reviser — round 1
+
+| ID | Disposition | Rationale (and, for Fixed, what changed) |
+|----|-------------|-------------------------------------------|
+| implementation-auditor-r1-f1 | Fixed | Added `"clamps exponential backoff at retry.maxDelayMs instead of growing unbounded"` to `tests/unit/http/http-client.test.ts` (before the `maxAttempts` override test). Uses a repeated-503 config with `{ maxAttempts: 3, baseDelayMs: 200, maxDelayMs: 250 }`, where the second retry's uncapped delay (400ms) must be clamped to 250ms; asserts total elapsed time lands at the clamped total (~450ms) rather than the uncapped total (~600ms), exercising the `Math.min(delay, maxDelayMs)` branch in `calculateBackoffDelayMs`. |
+| implementation-auditor-r1-f2 | Fixed | Added `"throws DattoApiError with retryAfterMs when 429 retries are exhausted"` to `tests/unit/http/http-client.test.ts`. Replies 429 with a parseable `Retry-After: "0"` exactly `DEFAULT_RETRY.maxAttempts` times, asserting the thrown `DattoApiError` has `statusCode: 429` and `retryAfterMs: 0`, exercising the `failedAttemptNumber >= retryPolicy.maxAttempts` throw branch in `handleResponseError`'s 429 path — distinct from the existing over-`MAX_RETRY_AFTER_MS` and 429-then-200 tests. |
