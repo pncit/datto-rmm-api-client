@@ -286,6 +286,13 @@ export abstract class BaseResource {
    * keeps the UDF masker off the per-row hot path. Per R20, the dropped rows' fields ride in
    * `meta` (masked by `withUdfMasking` before reaching the real sink), never the message string.
    *
+   * **Non-array `data` is itself a diagnostic, not a silent empty result.** A genuinely-empty page
+   * is `data` being an (empty) array — that emits no `warn`, since zero items is a legitimate
+   * outcome. But `data` being `undefined`/`null`/non-array (a wrong `arrayKey`, or a spec drift that
+   * renamed/removed the array field) is indistinguishable from "empty" unless reported: it emits
+   * its own single `warn`, distinct from the per-item drop summary, so a caller sees a shape
+   * problem instead of a page that silently vanished.
+   *
    * @internal
    */
   protected validateArrayResponse<T>(
@@ -295,6 +302,7 @@ export abstract class BaseResource {
   ): T[] {
     const items: T[] = [];
     const dropped: Array<{ index: number; error: string }> = [];
+    const label = context || UNKNOWN_CONTEXT;
 
     if (Array.isArray(data)) {
       for (let index = 0; index < data.length; index++) {
@@ -302,7 +310,7 @@ export abstract class BaseResource {
           itemSchema,
           data[index],
           this.logger,
-          context,
+          label,
         );
         if (result.success) {
           items.push(result.data as T);
@@ -310,11 +318,21 @@ export abstract class BaseResource {
           dropped.push({ index, error: z.prettifyError(result.error) });
         }
       }
+    } else {
+      this.logger.warn("response array field was not an array", {
+        context: label,
+        receivedType:
+          data === undefined
+            ? "undefined"
+            : data === null
+              ? "null"
+              : typeof data,
+      });
     }
 
     if (dropped.length > 0) {
       this.logger.warn("dropped invalid response array items", {
-        context: context || UNKNOWN_CONTEXT,
+        context: label,
         dropped: dropped.length,
         total: Array.isArray(data) ? data.length : 0,
         firstErrors: dropped.slice(0, MAX_REPORTED_DROP_ERRORS),
@@ -346,20 +364,25 @@ export abstract class BaseResource {
    * @param itemSchema - Zod schema each array item is validated against
    * @param params - Optional query-string parameters for the **first** request only —
    *   `nextPageUrl` already carries whatever query state the server needs for subsequent pages
-   * @param context - Label for the call site, threaded into leniency diagnostics and any thrown
-   *   `DattoValidationError`
+   * @param context - Optional label for the call site, threaded into leniency diagnostics and any
+   *   thrown `DattoValidationError`; falls back to `'(unknown)'` when omitted (mirrors the plan's
+   *   pinned `paginate(startPath, arrayKey, itemSchema, params?, context?)` signature, where both
+   *   trailing parameters are optional — see this class's doc for why the `http*` primitives, whose
+   *   overload dispatch depends on a fixed argument-tail length, require `context` while `paginate`,
+   *   which has no such overload, does not)
    * @throws {DattoValidationError} If any page's `pageDetails` cursor is missing or malformed
    */
   protected async paginate<T>(
     startPath: string,
     arrayKey: string,
     itemSchema: z.ZodType<T>,
-    params: Record<string, unknown> | undefined,
-    context: string,
+    params?: Record<string, unknown>,
+    context?: string,
   ): Promise<T[]> {
     const items: T[] = [];
     let url: string | null = startPath;
     let pageParams = params;
+    const label = context || UNKNOWN_CONTEXT;
 
     while (url) {
       const { data } = await this.axios.get(url, {
@@ -370,13 +393,15 @@ export abstract class BaseResource {
         (data as Record<string, unknown> | undefined)?.pageDetails,
       );
       if (!cursor.success) {
-        throw new DattoValidationError(cursor.error, "response", { context });
+        throw new DattoValidationError(cursor.error, "response", {
+          context: label,
+        });
       }
       items.push(
         ...this.validateArrayResponse(
           (data as Record<string, unknown> | undefined)?.[arrayKey],
           itemSchema,
-          context,
+          label,
         ),
       );
       url = cursor.data.nextPageUrl || null;

@@ -256,6 +256,75 @@ describe("BaseResource.paginate", () => {
     expect(descriptors).toEqual([{ kind: "read" }, { kind: "read" }]);
   });
 
+  it("warns (rather than silently yielding zero items) when the named array field is missing/misnamed", async () => {
+    nock(BASE_URL)
+      .get("/account/devices")
+      .reply(200, {
+        pageDetails: {
+          count: 0,
+          totalCount: 0,
+          prevPageUrl: null,
+          nextPageUrl: null,
+        },
+        // Note: no "devices" key at all — a wrong arrayKey or a spec-drift-removed field.
+      });
+    const { instance } = createTrackedAxios();
+    const logger = createMockLogger();
+    const resource = new TestResource(instance, logger);
+
+    const result = await resource.walk(
+      "/account/devices",
+      "devices",
+      deviceSchema,
+      undefined,
+      "GET /account/devices",
+    );
+
+    expect(result).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "response array field was not an array",
+      expect.objectContaining({
+        context: "GET /account/devices",
+        receivedType: "undefined",
+      }),
+    );
+  });
+
+  it("accepts omitted trailing params/context, matching the plan's pinned optional signature", async () => {
+    nock(BASE_URL)
+      .get("/account/devices")
+      .reply(200, {
+        pageDetails: {
+          count: 1,
+          totalCount: 1,
+          prevPageUrl: null,
+          nextPageUrl: null,
+        },
+        devices: [{ uid: "d1", hostname: "host1" }],
+      });
+    const { instance } = createTrackedAxios();
+
+    class BareTestResource extends BaseResource {
+      walkBare<T>(
+        startPath: string,
+        arrayKey: string,
+        itemSchema: z.ZodType<T>,
+      ) {
+        // No params/context supplied at all — proves both trailing parameters are optional.
+        return this.paginate(startPath, arrayKey, itemSchema);
+      }
+    }
+    const resource = new BareTestResource(instance, createMockLogger());
+
+    const result = await resource.walkBare(
+      "/account/devices",
+      "devices",
+      deviceSchema,
+    );
+
+    expect(result).toEqual([{ uid: "d1", hostname: "host1" }]);
+  });
+
   it("sends the initial params only on the first request — nextPageUrl carries its own query state", async () => {
     nock(BASE_URL)
       .get("/account/devices")

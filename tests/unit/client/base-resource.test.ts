@@ -439,22 +439,84 @@ describe("BaseResource", () => {
       );
     });
 
-    it("never emits the dropped item's raw fields in the message string (R20 invariant)", () => {
+    it("never leaks a dropped item's raw wire value, in the message or in meta (R20 invariant)", () => {
       const { instance } = createTrackedAxios();
       const logger = createMockLogger();
       const resource = new TestResource(instance, logger);
-      const schema = z.object({ udf1: z.string() });
+      // A real string wire value, of the wrong type for the schema (schema expects a number),
+      // so it actually enters `dropped[].error` via zod's prettified error text — the one path
+      // that could carry a raw value into `meta` outside the UDF-key-based masker's reach.
+      const schema = z.object({ udf1: z.number() });
 
       resource.arrayResponse(
-        [{ udf1: "S3CR3T-SHAPE-MISMATCH".length }],
+        [{ udf1: "S3CR3T-RAW-WIRE-VALUE" }],
         schema,
         "ctx",
       );
 
-      const [message] = (logger.warn as ReturnType<typeof vi.fn>).mock
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      const [message, meta] = (logger.warn as ReturnType<typeof vi.fn>).mock
         .calls[0]!;
       expect(message).toBe("dropped invalid response array items");
-      expect(message).not.toContain("S3CR3T");
+      expect(message).not.toContain("S3CR3T-RAW-WIRE-VALUE");
+      // `meta` (and specifically `firstErrors`, the only place a per-item zod error rides) must
+      // not carry the raw value either — zod's `prettifyError` emits type names/paths, never the
+      // parsed value itself, but this asserts that invariant directly rather than trusting it.
+      expect(JSON.stringify(meta)).not.toContain("S3CR3T-RAW-WIRE-VALUE");
+    });
+
+    it("emits a distinct warn (not a silent empty result) when data is present but not an array", () => {
+      const { instance } = createTrackedAxios();
+      const logger = createMockLogger();
+      const resource = new TestResource(instance, logger);
+      const schema = z.object({ name: z.string() });
+
+      const result = resource.arrayResponse(
+        { name: "not an array" },
+        schema,
+        "test-context",
+      );
+
+      expect(result).toEqual([]);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        "response array field was not an array",
+        expect.objectContaining({
+          context: "test-context",
+          receivedType: "object",
+        }),
+      );
+    });
+
+    it("emits the same distinct warn when the array field is entirely absent (undefined)", () => {
+      const { instance } = createTrackedAxios();
+      const logger = createMockLogger();
+      const resource = new TestResource(instance, logger);
+      const schema = z.object({ name: z.string() });
+
+      const result = resource.arrayResponse(undefined, schema, "test-context");
+
+      expect(result).toEqual([]);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        "response array field was not an array",
+        expect.objectContaining({
+          context: "test-context",
+          receivedType: "undefined",
+        }),
+      );
+    });
+
+    it("emits nothing when data is a genuinely empty array", () => {
+      const { instance } = createTrackedAxios();
+      const logger = createMockLogger();
+      const resource = new TestResource(instance, logger);
+      const schema = z.object({ name: z.string() });
+
+      const result = resource.arrayResponse([], schema, "test-context");
+
+      expect(result).toEqual([]);
+      expect(logger.warn).not.toHaveBeenCalled();
     });
 
     it("emits nothing when every item validates", () => {
