@@ -1,0 +1,19 @@
+## typescript-cop — round 3
+
+Reconciled round 2's one Open finding against `reviser-r3.md`'s disposition and the current diff
+(`git diff` against the round-2 checkpoint commit, `src/validation/schema-leniency.ts`,
+`src/validation/diagnostics.ts`, `tests/unit/validation/schema-leniency.test.ts`, and the new
+`tests/generated/lenient-type-pin.ts`). Re-read `schema-leniency.ts` and `diagnostics.ts` in full
+rather than trusting the disposition prose, re-derived `Lenient<T>`'s distribution behavior by hand
+for every field pattern actually present in `src/generated/types/**` (plain scalar, nested named
+object, array-of-objects, open-enum primitive, index-signature/record type), and independently
+compiled `tests/generated/lenient-type-pin.ts` plus the rest of `tests/**/*.ts` via
+`npx tsc -p tsconfig.test.json --noEmit`: clean.
+
+## Findings
+
+| ID | Severity | Status | Category | Location | Finding | Recommendation |
+|----|----------|--------|----------|----------|---------|----------------|
+| typescript-cop-r2-f1 | Low | Closed | PublicTypes | — | — | ratified: `tests/generated/lenient-type-pin.ts` is a compile-time-only regression pin (no runtime assertions, not matched by vitest's `tests/**/*.test.ts` include, but matched by `tsconfig.test.json`'s `tests/**/*.ts`, so `npm run typecheck` fails the build if `Lenient<T>` breaks). It exercises `Lenient<Device>`, `Lenient<Alert>`, `Lenient<AlertsPage>` across a plain scalar field, a nested named-object field, a nested array-of-objects field, and an open-enum field at two nesting depths, via the standard `Equal`/`Expect` generic-function idiom. Building it surfaced and fixed a real, independent defect in `Lenient<T>` itself (not just added a test around the prior code): because `T` is a naked type parameter, `Lenient<T>` previously distributed the `object` branch over the widened-enum union's own `(string & {})` member (which structurally satisfies `extends object`), corrupting every enum field's type (`deviceClass`, `alertPriority`, `antivirusStatus`, …) into a mapped-over-`String.prototype` shape instead of leaving it a plain (nullable) string. The fix inserts a primitive-type branch (`string \| number \| boolean \| bigint \| symbol \| null \| undefined`) before the `object` branch so every primitive union member — branded or not — short-circuits first; the ordering is documented as load-bearing on the type itself, not merely in prose. Verified independently: hand-traced `Lenient<Device>['deviceClass']`, `Lenient<Alert>['responseActions']` (array elements not independently `\| null`, matching `addCatchallRecursive`'s array case not calling `toLenientField` on elements), and `Lenient<RateStatusResponseOperationWriteStatus>` (index-signature type, conservatively widened) against the actual generated types by hand, then confirmed via a fresh `tsc -p tsconfig.test.json --noEmit` — clean, matching the pin file's own assertions exactly. |
+
+No new findings. The round's other change (`engineer-r2-f1`'s `transform` case added to `cleanAndDiagnoseResponse`) is outside this domain's prior findings and introduces no new type hole: it mirrors `addCatchallRecursive`'s existing `'transform'` terminal case exactly (opaque pass-through, no shape to clean), and its regression test exercises the real defect (a bare `.transform()` whose `pipe` `out` side is itself a `transform` node, previously routed into the throwing `default`) rather than a synthetic one. `_zod.def` isolation still holds — no second call site outside `schema-leniency.ts` — the `_zod.def` type (`ZodInternalDef`), `nodeChildren`, and `groupKey`'s `JSON.stringify`-based dedup key from round 1 are all unchanged and still sound, and no floating promises or async-correctness issues exist (the module remains fully synchronous). This phase's type-safety surface is now clean.

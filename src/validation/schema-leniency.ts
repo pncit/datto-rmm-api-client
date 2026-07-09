@@ -567,6 +567,17 @@ function cleanAndDiagnoseResponse(
       return parsed;
     }
 
+    // A `.transform()` step reached directly (not via `pipe`'s `pipeOut` recursion above -- see
+    // that case). A bare `z.string().transform(fn)` is itself a `ZodPipe` whose `out` side is a
+    // `ZodTransform` node (`def.type === "transform"`), so the `pipe` case's recursion into
+    // `pipeOut` can land here for a schema that pipes straight into a transform rather than into
+    // an object. Mirrors `addCatchallRecursive`'s identical `'transform'` terminal case: the node
+    // carries no shape to clean or diagnose, so `parsed` is returned unchanged, opaque, exactly
+    // like the terminals above -- not routed to the throwing `default` below.
+    case "transform": {
+      return parsed;
+    }
+
     default: {
       // See addCatchallRecursive's identical default case: an unrecognized node kind here means
       // this pass would silently skip cleaning/diagnosing that entire subtree. Fail loudly.
@@ -679,12 +690,29 @@ export function enumFieldPaths(schema: z.ZodType): string[] {
  * extra `null` branch a caller may need to narrow away that can never actually occur) — it can
  * never *narrow* it the way returning the bare, unmapped `T` did, which is precisely the defect
  * this type exists to fix.
+ *
+ * **Primitives are checked before `object` — deliberately, not merely for clarity.** `T` is a bare
+ * (naked) type parameter in every branch here, so a conditional type on it *distributes* over a
+ * union: when `T` is one of the widened response-enum types every generated schema actually uses
+ * (`EnumUnion | (string & {})`, `widen-response-enums.mjs`, Phase 2), `Lenient<T>` is evaluated
+ * per union member, including the open `(string & {})` branch on its own. That branded-primitive
+ * idiom structurally satisfies TypeScript's `extends object` check (the intersected `{}` makes it
+ * so) even though every value it describes is a plain string — so an `object`-first ordering would
+ * incorrectly map `Lenient` over `String.prototype`'s own members for that branch, corrupting the
+ * type of every enum field this client has (`deviceClass`, `alertPriority`, `antivirusStatus`,
+ * …). Checking the primitive-type branch first short-circuits every string/number/boolean/bigint/
+ * symbol/null/undefined union member — including a branded one — before the `object` branch can
+ * ever misfire on it. Pinned by `tests/generated/lenient-type-pin.ts`, which asserts
+ * `Lenient<Device>['deviceClass']` equals the field's own (unmodified) enum type plus `| null |
+ * undefined`, not a mapped object.
  */
 export type Lenient<T> = T extends readonly (infer U)[]
   ? Lenient<U>[]
-  : T extends object
-    ? { [K in keyof T]: Lenient<T[K]> | null }
-    : T;
+  : T extends string | number | boolean | bigint | symbol | null | undefined
+    ? T
+    : T extends object
+      ? { [K in keyof T]: Lenient<T[K]> | null }
+      : T;
 
 // ---------------------------------------------------------------------------
 // parseLenient (public API)

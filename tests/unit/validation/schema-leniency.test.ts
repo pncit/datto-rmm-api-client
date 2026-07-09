@@ -499,6 +499,26 @@ describe("parseLenient", () => {
         expect.objectContaining({ field: "extra", context: "pipe-ctx" }),
       );
     });
+
+    it("does not throw when a bare .transform() schema is parsed directly", () => {
+      // A bare `z.string().transform(fn)` (no trailing `.pipe(objectSchema)`) is itself a
+      // `ZodPipe` whose `out` side is a `ZodTransform` node (`def.type === "transform"`).
+      // `cleanAndDiagnoseResponse`'s `pipe` case recurses into `pipeOut`, which for this schema
+      // lands on the `transform` node itself -- previously uncovered by the "pipe schema" test
+      // above (whose `pipeOut` is an object, never a transform), and would have fallen into the
+      // throwing `default` case before the `transform` case was added.
+      const schema = z.string().transform((s) => JSON.parse(s) as unknown);
+      const data = JSON.stringify({ parsed: true });
+      const { logger } = createMockDebugLogger();
+
+      expect(() => parseLenient(schema, data, logger, "bare-transform-ctx")).not.toThrow();
+
+      const result = parseLenient(schema, data, logger, "bare-transform-ctx");
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toEqual({ parsed: true });
+      }
+    });
   });
 
   // ---------------------------------------------------------------------------
