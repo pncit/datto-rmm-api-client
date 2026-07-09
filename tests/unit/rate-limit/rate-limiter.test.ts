@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { RateDescriptor } from "@/rate-limit/rate-limiter";
 import { MultiWindowRateLimiter } from "@/rate-limit/rate-limiter";
 
 describe("MultiWindowRateLimiter", () => {
@@ -114,6 +115,53 @@ describe("MultiWindowRateLimiter", () => {
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(resolved).toBe(true);
+  });
+
+  it("does not use an inherited Object.prototype property as a write limit for a colliding opKey", async () => {
+    const limiter = new MultiWindowRateLimiter();
+
+    for (let i = 0; i < 100; i++) {
+      await limiter.acquire({ kind: "write", opKey: "toString" });
+    }
+
+    let resolved = false;
+    void limiter.acquire({ kind: "write", opKey: "toString" }).then(() => {
+      resolved = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(resolved).toBe(true);
+  });
+
+  it("throws for an unrecognized RateDescriptor kind instead of silently treating it as a write", async () => {
+    const limiter = new MultiWindowRateLimiter();
+
+    await expect(
+      limiter.acquire({ kind: "delete" } as unknown as RateDescriptor),
+    ).rejects.toThrow(/Unhandled RateDescriptor kind/);
+  });
+
+  it("emits a debug log when throttling a request until its window has room", async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const limiter = new MultiWindowRateLimiter({
+      readLimit: 1,
+      windowSeconds: 1,
+      logger,
+    });
+
+    await limiter.acquire({ kind: "read" });
+    const pending = limiter.acquire({ kind: "read" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      "throttling request until rate-limit window has room",
+      expect.objectContaining({ kind: "read" }),
+    );
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await pending;
   });
 
   it("respects overridden readLimit/writeAggregateLimit/windowSeconds", async () => {

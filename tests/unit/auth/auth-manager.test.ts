@@ -149,6 +149,77 @@ describe("AuthManager", () => {
     expect(error).toBeInstanceOf(DattoApiError);
     expect((error as DattoApiError).statusCode).toBe(0);
   });
+
+  it("does not expose apiKey/apiSecret anywhere reachable via the thrown error's cause on a failed grant", async () => {
+    nock(BASE_URL)
+      .post(GRANT_PATH)
+      .reply(401, { message: "invalid credentials" });
+
+    const manager = new AuthManager(
+      config({ apiKey: "super-secret-key", apiSecret: "super-secret-value" }),
+    );
+    const error = await manager.getToken().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DattoApiError);
+    const serialized = JSON.stringify(
+      error,
+      Object.getOwnPropertyNames(error as object),
+    );
+    expect(serialized).not.toContain("super-secret-key");
+    expect(serialized).not.toContain("super-secret-value");
+  });
+
+  it("coalesces concurrent getToken calls against a cold cache into a single grant round-trip", async () => {
+    const scope = nock(BASE_URL)
+      .post(GRANT_PATH)
+      .once()
+      .reply(200, { access_token: "tok-1", expires_in: 3600 });
+
+    const manager = new AuthManager(config());
+    const [first, second, third] = await Promise.all([
+      manager.getToken(),
+      manager.getToken(),
+      manager.getToken(),
+    ]);
+
+    expect(first.accessToken).toBe("tok-1");
+    expect(second.accessToken).toBe("tok-1");
+    expect(third.accessToken).toBe("tok-1");
+    expect(scope.isDone()).toBe(true);
+  });
+
+  it("throws DattoApiError when a 200 grant response is missing access_token/expires_in", async () => {
+    nock(BASE_URL).post(GRANT_PATH).reply(200, { expires_in: 3600 });
+
+    const manager = new AuthManager(config());
+    const error = await manager.getToken().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DattoApiError);
+  });
+
+  it("throws DattoApiError when a 200 grant response has a non-numeric expires_in", async () => {
+    nock(BASE_URL)
+      .post(GRANT_PATH)
+      .reply(200, { access_token: "tok-1", expires_in: "soon" });
+
+    const manager = new AuthManager(config());
+    const error = await manager.getToken().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DattoApiError);
+  });
+
+  it("treats a stalled grant request exceeding timeoutMs as a transport failure", async () => {
+    nock(BASE_URL)
+      .post(GRANT_PATH)
+      .delay(50)
+      .reply(200, { access_token: "tok-1", expires_in: 3600 });
+
+    const manager = new AuthManager(config({ timeoutMs: 10 }));
+    const error = await manager.getToken().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DattoApiError);
+    expect((error as DattoApiError).statusCode).toBe(0);
+  }, 10_000);
 });
 
 describe("AuthManager.attachTo", () => {

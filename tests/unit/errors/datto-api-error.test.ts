@@ -66,7 +66,31 @@ describe("DattoApiError", () => {
       expect(err.statusCode).toBe(404);
       expect(err.response).toEqual({ message: "Device not found" });
       expect(err.message).toBe("Device not found");
-      expect(err.cause).toBe(axiosErr);
+    });
+
+    it("attaches a redacted cause derived from the axios error, never the raw AxiosError", () => {
+      const axiosErr = makeAxiosError({
+        response: { status: 404, data: { message: "Device not found" } },
+      });
+      axiosErr.config = {
+        method: "get",
+        url: "/api/v2/device/1",
+        headers: { Authorization: "Bearer super-secret-token" },
+      } as AxiosError["config"];
+
+      const err = DattoApiError.fromAxiosError(axiosErr);
+
+      expect(err.cause).not.toBe(axiosErr);
+      expect(err.cause).toMatchObject({
+        name: axiosErr.name,
+        message: axiosErr.message,
+        status: 404,
+        method: "get",
+        url: "/api/v2/device/1",
+      });
+      const serialized = JSON.stringify(err.cause);
+      expect(serialized).not.toContain("super-secret-token");
+      expect(serialized).not.toContain("headers");
     });
 
     it("falls back to statusCode 0 for a transport-level failure with no response", () => {

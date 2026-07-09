@@ -6,6 +6,9 @@ export {
   DattoApiError,
   type DattoApiErrorCode,
   type DattoApiErrorOptions,
+  extractRequestId,
+  sanitizeAxiosErrorCause,
+  type SanitizedAxiosErrorCause,
 } from "./datto-api-error";
 export {
   DattoValidationError,

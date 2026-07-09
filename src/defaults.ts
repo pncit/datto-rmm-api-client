@@ -38,3 +38,12 @@ export const DEFAULT_TOKEN_REFRESH_PCT = 25;
  * instead of sleeping.
  */
 export const MAX_RETRY_AFTER_MS = 30_000;
+
+/**
+ * Default per-request socket timeout, in milliseconds, for both axios instances the
+ * transport layer constructs (`src/http/http-client.ts`'s shared instance and
+ * `src/auth/auth-manager.ts`'s bare `grantClient`, both Phase 5). Without a timeout a
+ * stalled/half-open connection hangs indefinitely instead of surfacing an error the
+ * retry logic can act on.
+ */
+export const DEFAULT_TIMEOUT_MS = 30_000;

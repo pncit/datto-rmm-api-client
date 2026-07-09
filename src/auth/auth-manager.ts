@@ -1,16 +1,23 @@
 import axios, { type AxiosError, type AxiosInstance } from "axios";
+import { z } from "zod";
 
-import { DEFAULT_TOKEN_REFRESH_PCT } from "../defaults";
+import { DEFAULT_TIMEOUT_MS, DEFAULT_TOKEN_REFRESH_PCT } from "../defaults";
 import { DattoApiError } from "../errors";
+import type { DattoLogger } from "../logging/logger";
 
 import { InMemoryTokenStore, type TokenInfo } from "./token-store";
 
-/** The OAuth2 password-grant token response Datto's `/auth/oauth/token` endpoint returns. */
-interface TokenResponse {
-  readonly access_token: string;
-  /** Token lifetime in seconds. */
-  readonly expires_in: number;
-}
+/**
+ * Zod schema for the OAuth2 password-grant token response Datto's `/auth/oauth/token` endpoint
+ * returns. The grant response is unvalidated external input at a trust boundary — without this
+ * check, a malformed body (missing `access_token`, non-numeric `expires_in`) would silently
+ * compute a `NaN` expiry and cache an unusable `accessToken: undefined` token that
+ * `needsRefresh` then never flags for refresh.
+ */
+const tokenResponseSchema = z.object({
+  access_token: z.string().min(1),
+  expires_in: z.number().positive(),
+});
 
 export interface AuthManagerConfig {
   readonly apiUrl: string;
@@ -18,6 +25,10 @@ export interface AuthManagerConfig {
   readonly apiSecret: string;
   /** Percentage of the token's original TTL remaining that triggers a proactive refresh. Default: {@link DEFAULT_TOKEN_REFRESH_PCT}. */
   readonly tokenRefreshPct?: number;
+  /** Per-request socket timeout for the grant/refresh round-trip, in milliseconds. Defaults to {@link DEFAULT_TIMEOUT_MS}. */
+  readonly timeoutMs?: number;
+  /** Optional logger for refresh observability. Never logs the request body or credentials. */
+  readonly logger?: DattoLogger;
 }
 
 const GRANT_PATH = "/auth/oauth/token";
@@ -49,11 +60,15 @@ export class AuthManager {
   private readonly store = new InMemoryTokenStore();
   private readonly grantClient: AxiosInstance;
   private readonly refreshPct: number;
+  /** The in-flight refresh, if any — shared by every concurrent caller so a burst of
+   * `getToken()` calls against an empty/stale cache produces exactly one grant round-trip. */
+  private pendingRefresh: Promise<TokenInfo> | undefined;
 
   constructor(private readonly config: AuthManagerConfig) {
     this.refreshPct = config.tokenRefreshPct ?? DEFAULT_TOKEN_REFRESH_PCT;
     this.grantClient = axios.create({
       baseURL: config.apiUrl,
+      timeout: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });
   }
@@ -99,8 +114,23 @@ export class AuthManager {
    * {@link DattoApiError} on failure — the one error-mapping site on the auth path, since the
    * bare {@link grantClient} deliberately carries none of the shared instance's response-error
    * interceptor (Phase 5 Step 3(b)/(c)).
+   *
+   * **Single-flight:** concurrent callers (e.g. several `BaseResource` calls firing in parallel
+   * against an empty or just-expired cache) share the one in-flight grant round-trip rather than
+   * each independently posting a grant request — a burst that would otherwise fire N simultaneous
+   * grants, each overwriting the store (last write wins), and self-inflict load on the auth
+   * endpoint precisely at client startup.
    */
   async refreshToken(): Promise<TokenInfo> {
+    if (!this.pendingRefresh) {
+      this.pendingRefresh = this.performRefresh().finally(() => {
+        this.pendingRefresh = undefined;
+      });
+    }
+    return this.pendingRefresh;
+  }
+
+  private async performRefresh(): Promise<TokenInfo> {
     const body = new URLSearchParams({
       grant_type: "password",
       username: this.config.apiKey,
@@ -108,9 +138,10 @@ export class AuthManager {
     });
 
     const issuedAt = Date.now();
+    this.config.logger?.debug("refreshing Datto RMM OAuth2 token");
     let response;
     try {
-      response = await this.grantClient.post<TokenResponse>(
+      response = await this.grantClient.post<unknown>(
         GRANT_PATH,
         body.toString(),
         {
@@ -121,6 +152,7 @@ export class AuthManager {
         },
       );
     } catch (err) {
+      this.config.logger?.warn("Datto RMM OAuth2 token refresh failed");
       if (axios.isAxiosError(err)) {
         throw DattoApiError.fromAxiosError(err as AxiosError<unknown>);
       }
@@ -130,16 +162,38 @@ export class AuthManager {
       });
     }
 
+    const parsed = tokenResponseSchema.safeParse(response.data);
+    if (!parsed.success) {
+      this.config.logger?.warn(
+        "Datto RMM OAuth2 token refresh returned a malformed response",
+      );
+      throw new DattoApiError(
+        "Datto RMM authentication returned a malformed token response",
+        {
+          statusCode: response.status,
+          response: response.data,
+          cause: parsed.error,
+        },
+      );
+    }
+
     const info: TokenInfo = {
-      accessToken: response.data.access_token,
+      accessToken: parsed.data.access_token,
       issuedAt,
-      expiresAt: issuedAt + response.data.expires_in * 1000,
+      expiresAt: issuedAt + parsed.data.expires_in * 1000,
     };
     this.store.set(info);
     return info;
   }
 
-  /** Discards the cached token, forcing the next {@link getToken} call to refresh. */
+  /**
+   * Discards the cached token, forcing the next {@link getToken} call to refresh. Intended to be
+   * wired as `HttpClientConfig.onUnauthorized` (`../http/http-client.ts`, Phase 5) by the client
+   * scaffold (Phase 7): a 401 on the shared instance means the cached token was rejected
+   * server-side (revoked, or expired before the proactive-refresh window caught it), and
+   * invalidating it here makes the transport's single automatic retry pick up a freshly-fetched
+   * token instead of resending the same stale one.
+   */
   invalidate(): void {
     this.store.invalidate();
   }

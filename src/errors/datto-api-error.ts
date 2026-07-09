@@ -4,6 +4,8 @@ import type {
   RawAxiosResponseHeaders,
 } from "axios";
 
+import { isRecord } from "../util/is-record";
+
 import { BaseError } from "./base-error";
 
 /**
@@ -49,10 +51,6 @@ const REQUEST_ID_HEADERS = [
   "x-requestid",
   "request-id",
 ] as const;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 /**
  * Returns the first value in `record` whose key is in `keys` (in order) and is a
@@ -108,7 +106,7 @@ function extractErrorMessage(
 }
 
 /** Reads the first matching request-id header, if present. */
-function extractRequestId(
+export function extractRequestId(
   headers: AxiosResponseHeaders | RawAxiosResponseHeaders | undefined,
 ): string | undefined {
   if (!headers) {
@@ -118,6 +116,45 @@ function extractRequestId(
     headers as Record<string, unknown>,
     REQUEST_ID_HEADERS,
   );
+}
+
+/**
+ * Fields preserved from a failed Axios request when it becomes another error's `cause` — enough
+ * to debug the failure (what request, what status, what transport-level error code) without ever
+ * carrying the outgoing `Authorization` header, `config.auth`, or the request body.
+ */
+export interface SanitizedAxiosErrorCause {
+  readonly name: string;
+  readonly message: string;
+  readonly code: string | undefined;
+  readonly status: number | undefined;
+  readonly method: string | undefined;
+  readonly url: string | undefined;
+}
+
+/**
+ * Redacts credential-bearing fields from a failed Axios request before it is attached as an
+ * `Error.cause`. `AxiosError.config` is own-enumerable and can carry the outgoing
+ * `Authorization: Bearer <token>` header, a `config.auth` basic-auth pair, or the raw request
+ * body (e.g. the OAuth2 grant's `username`/`password` on the auth path) — all of which
+ * `console.error`/`util.inspect` (and most crash-reporting integrations) print when walking a
+ * caught error's `cause` chain. This strips all of that, keeping only what a caller needs to
+ * debug the failure: the error's own name/message/code and the request's method/url — never
+ * headers, `config.auth`, or the body. Used by {@link DattoApiError.fromAxiosError} and by the
+ * Phase 5 HTTP transport's direct `DattoApiError` constructions (403/429 handling), so no throw
+ * path attaches a raw, unredacted `AxiosError` as `cause`.
+ */
+export function sanitizeAxiosErrorCause(
+  err: AxiosError,
+): SanitizedAxiosErrorCause {
+  return {
+    name: err.name,
+    message: err.message,
+    code: err.code,
+    status: err.response?.status,
+    method: err.config?.method,
+    url: err.config?.url,
+  };
 }
 
 /**
@@ -170,7 +207,7 @@ export class DattoApiError extends BaseError {
       statusCode: err.response?.status ?? 0,
       response: responseData,
       requestId: extractRequestId(err.response?.headers),
-      cause: err,
+      cause: sanitizeAxiosErrorCause(err),
     });
   }
 }

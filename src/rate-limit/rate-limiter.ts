@@ -1,3 +1,6 @@
+import type { DattoLogger } from "../logging/logger";
+import { sleep } from "../util/sleep";
+
 import {
   DEFAULT_WRITE_LIMIT,
   READ_LIMIT,
@@ -29,12 +32,8 @@ export interface RateLimiterOptions {
   readonly readLimit?: number;
   readonly writeAggregateLimit?: number;
   readonly windowSeconds?: number;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+  /** Optional logger for throttle-wait observability. No bodies/headers are logged. */
+  readonly logger?: DattoLogger;
 }
 
 /**
@@ -94,6 +93,7 @@ export class MultiWindowRateLimiter {
   private readonly readWindow: SlidingWindow;
   private readonly aggregateWriteWindow: SlidingWindow;
   private readonly writeWindows = new Map<string, SlidingWindow>();
+  private readonly logger: DattoLogger | undefined;
 
   constructor(options?: RateLimiterOptions) {
     this.windowMs = (options?.windowSeconds ?? WINDOW_SECONDS) * 1000;
@@ -105,20 +105,40 @@ export class MultiWindowRateLimiter {
       options?.writeAggregateLimit ?? WRITE_AGGREGATE_LIMIT,
       this.windowMs,
     );
+    this.logger = options?.logger;
   }
 
   private writeWindowFor(opKey: string | undefined): SlidingWindow {
     const key = opKey ?? "(unspecified)";
     let window = this.writeWindows.get(key);
     if (!window) {
+      // `Object.hasOwn` (not `in`) deliberately excludes inherited `Object.prototype` keys
+      // (`toString`, `constructor`, `__proto__`, …): `in` would match those for an
+      // untyped/adversarial opKey and hand back a function/object as `limit` instead of a number.
       const limit =
-        opKey !== undefined && opKey in WRITE_LIMITS
+        opKey !== undefined && Object.hasOwn(WRITE_LIMITS, opKey)
           ? WRITE_LIMITS[opKey as WriteOpKey]
           : DEFAULT_WRITE_LIMIT;
       window = new SlidingWindow(limit, this.windowMs);
       this.writeWindows.set(key, window);
     }
     return window;
+  }
+
+  /** The set of windows `descriptor` must clear, per its `kind`. Exhaustively matched (rather
+   * than an `else`-as-write ternary) so a future third `kind` fails to compile here instead of
+   * silently falling through the write path. */
+  private windowsFor(descriptor: RateDescriptor): SlidingWindow[] {
+    switch (descriptor.kind) {
+      case "read":
+        return [this.readWindow];
+      case "write":
+        return [this.aggregateWriteWindow, this.writeWindowFor(descriptor.opKey)];
+      default: {
+        const exhaustive: never = descriptor.kind;
+        throw new Error(`Unhandled RateDescriptor kind: ${String(exhaustive)}`);
+      }
+    }
   }
 
   /**
@@ -128,10 +148,7 @@ export class MultiWindowRateLimiter {
    * applicable set" (design), so a request only proceeds once neither ceiling would be exceeded.
    */
   async acquire(descriptor: RateDescriptor): Promise<void> {
-    const windows =
-      descriptor.kind === "read"
-        ? [this.readWindow]
-        : [this.aggregateWriteWindow, this.writeWindowFor(descriptor.opKey)];
+    const windows = this.windowsFor(descriptor);
 
     for (;;) {
       const now = Date.now();
@@ -140,6 +157,11 @@ export class MultiWindowRateLimiter {
         for (const w of windows) w.record(now);
         return;
       }
+      this.logger?.debug("throttling request until rate-limit window has room", {
+        kind: descriptor.kind,
+        opKey: descriptor.opKey,
+        waitMs,
+      });
       await sleep(waitMs);
     }
   }
