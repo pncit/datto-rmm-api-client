@@ -1,0 +1,26 @@
+{
+  "alertUid": "alert-uid-antivirus",
+  "priority": "Critical",
+  "resolved": false,
+  "muted": false,
+  "timestamp": 1721139000000,
+  "alertContext": {
+    "@class": "antivirus_ctx",
+    "threatName": "Trojan.GenericKD.12345",
+    "action": "Quarantined",
+    "product": "Windows Defender"
+  },
+  "alertSourceInfo": {
+    "deviceUid": "device-uid-1",
+    "deviceName": "server1",
+    "siteUid": "site-uid-1",
+    "siteName": "Main Site"
+  },
+  "responseActions": [
+    {
+      "actionType": "TICKET_CREATED",
+      "description": "Ticket opened for review",
+      "actionReference": "TCK-1001"
+    }
+  ]
+}

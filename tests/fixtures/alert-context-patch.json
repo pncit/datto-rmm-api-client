@@ -1,0 +1,21 @@
+{
+  "alertUid": "alert-uid-patch",
+  "priority": "Low",
+  "resolved": true,
+  "resolvedBy": "auto",
+  "resolvedOn": 1721140000000,
+  "muted": false,
+  "timestamp": 1721135000000,
+  "alertContext": {
+    "@class": "patch_ctx",
+    "patchTitle": "KB5001330",
+    "severity": "Critical",
+    "patchStatus": "InstallError"
+  },
+  "alertSourceInfo": {
+    "deviceUid": "device-uid-2",
+    "deviceName": "server2",
+    "siteUid": "site-uid-1",
+    "siteName": "Main Site"
+  }
+}

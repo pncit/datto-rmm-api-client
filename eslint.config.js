@@ -17,15 +17,16 @@ export default [
   // Base JavaScript recommended rules
   js.configs.recommended,
 
-  // Global ignores — aligned with tsconfig.json exclude paths
+  // Global ignores — aligned with tsconfig.json exclude paths. src/generated/** mirrors
+  // fuze-api's own eslint config: generated code is never hand-fixed, so it is never linted.
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.config.js'],
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.config.js', 'src/generated/**'],
   },
 
   // TypeScript source files (excludes tests, which get a looser config below)
   {
     files: ['src/**/*.ts'],
-    ignores: ['src/**/*.test.ts', 'src/__tests__/**'],
+    ignores: ['src/**/*.test.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
@@ -66,7 +67,7 @@ export default [
 
   // Test files — looser rules
   {
-    files: ['src/**/*.test.ts', 'src/__tests__/**/*.ts'],
+    files: ['src/**/*.test.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
@@ -74,7 +75,9 @@ export default [
         sourceType: 'module',
       },
       globals: {
-        // Jest globals
+        // Vitest globals (vitest.config.ts sets `test.globals: true`); test files also
+        // import these explicitly from 'vitest', but declaring them here keeps `no-undef`
+        // (already off below) consistent with the runtime environment.
         describe: 'readonly',
         it: 'readonly',
         test: 'readonly',
@@ -83,7 +86,7 @@ export default [
         afterEach: 'readonly',
         beforeAll: 'readonly',
         afterAll: 'readonly',
-        jest: 'readonly',
+        vi: 'readonly',
       },
     },
     plugins: {

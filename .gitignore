@@ -59,6 +59,10 @@ web_modules/
 # Optional REPL history
 .node_repl_history
 
+# Editor swap files
+*.swp
+*.swo
+
 # Output of 'npm pack'
 *.tgz
 
@@ -137,3 +141,23 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Datto RMM OpenAPI codegen (Phase 2)
+# spec/openapi.json + spec/openapi-prev.json are committed (they are the reproducibility
+# baseline). spec/openapi.patched.json is a transient intermediate produced by
+# scripts/patch-spec.mjs on every `npm run generate` run and is never committed.
+spec/openapi.patched.json
+# The Orval endpoints layer is a transient by-product of the axios target (Orval cannot
+# emit types without also emitting endpoint stubs for a spec that declares paths); the
+# client never imports it, so it is git-ignored rather than committed.
+src/generated/endpoints/
+# NOTE: src/generated/types/ and src/generated/schemas/ are intentionally NOT ignored —
+# they are committed because they derive from an external spec (finalized in Phase 2).
+
+# Raw (unsanitized) Datto RMM sweep captures (Phase 9) — the input to
+# scripts/sanitize-fixtures.mjs — must never be committed: UDF values have been observed to carry
+# secrets (BitLocker recovery keys, admin usernames, credentials). Name any such capture with a
+# `raw-sweep.json` suffix (matches the script's own usage example) so a raw capture cannot be
+# accidentally staged, independent of maintainer discipline. Only the *sanitized* output of the
+# script belongs under tests/fixtures/.
+*raw-sweep.json

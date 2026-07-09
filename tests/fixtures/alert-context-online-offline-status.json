@@ -1,0 +1,21 @@
+{
+  "alertUid": "alert-uid-online-offline",
+  "priority": "Information",
+  "resolved": true,
+  "resolvedBy": "system",
+  "resolvedOn": 1721141000000,
+  "muted": true,
+  "timestamp": 1721140500000,
+  "alertContext": {
+    "@class": "online_offline_status_ctx",
+    "previousStatus": "online",
+    "currentStatus": "offline",
+    "offlineDurationMinutes": 15
+  },
+  "alertSourceInfo": {
+    "deviceUid": "device-uid-2",
+    "deviceName": "server2",
+    "siteUid": "site-uid-1",
+    "siteName": "Main Site"
+  }
+}

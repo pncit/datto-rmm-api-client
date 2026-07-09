@@ -1,0 +1,23 @@
+{
+  "pageDetails": {
+    "count": 2,
+    "totalCount": 2,
+    "prevPageUrl": "",
+    "nextPageUrl": ""
+  },
+  "devices": [
+    {
+      "id": 601,
+      "uid": "device-uid-601",
+      "hostname": "server-601",
+      "deviceClass": "device",
+      "online": true
+    },
+    {
+      "id": 602,
+      "uid": 602,
+      "hostname": "server-602",
+      "deviceClass": "device"
+    }
+  ]
+}

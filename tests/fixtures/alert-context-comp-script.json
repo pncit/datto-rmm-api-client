@@ -1,0 +1,32 @@
+{
+  "alertUid": "alert-uid-comp-script",
+  "priority": "Moderate",
+  "diagnostics": "Component script completed with a non-zero exit code",
+  "resolved": false,
+  "muted": false,
+  "timestamp": 1721131200000,
+  "alertMonitorInfo": {
+    "sendsEmails": true,
+    "createsTicket": false
+  },
+  "alertContext": {
+    "@class": "comp_script_ctx",
+    "componentName": "Disk Cleanup",
+    "exitCode": 1,
+    "stdOut": "Cleanup failed: insufficient permissions"
+  },
+  "alertSourceInfo": {
+    "deviceUid": "device-uid-1",
+    "deviceName": "server1",
+    "siteUid": "site-uid-1",
+    "siteName": "Main Site"
+  },
+  "responseActions": [
+    {
+      "actionTime": "2024-07-16T12:00:00Z",
+      "actionType": "EMAIL_SENT",
+      "description": "Notification sent"
+    }
+  ],
+  "autoresolveMins": 60
+}

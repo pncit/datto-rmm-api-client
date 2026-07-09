@@ -1,0 +1,22 @@
+{
+  "alertUid": "alert-uid-eventlog",
+  "priority": "High",
+  "diagnostics": "Application crashed",
+  "resolved": false,
+  "muted": false,
+  "timestamp": 1721131260000,
+  "alertContext": {
+    "@class": "eventlog_ctx",
+    "eventId": 1000,
+    "eventSource": "Application Error",
+    "eventLogName": "Application",
+    "message": "Faulting application name: app.exe"
+  },
+  "alertSourceInfo": {
+    "deviceUid": "device-uid-1",
+    "deviceName": "server1",
+    "siteUid": "site-uid-1",
+    "siteName": "Main Site"
+  },
+  "autoresolveMins": null
+}

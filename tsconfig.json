@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true,
@@ -15,5 +19,5 @@
     "allowSyntheticDefaultImports": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist", "src/__tests__"]
+  "exclude": ["node_modules", "dist"]
 }

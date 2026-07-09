@@ -91,3 +91,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # R15: verifies `src/generated/**` reproduces byte-for-byte from the committed spec. Kept
+      # out of the default `npm test` (see vitest.config.ts) since it shells out to a full Orval
+      # codegen pass and to git; run explicitly here instead.
+      - name: Reproducibility (R15)
+        run: npm run test:repro
