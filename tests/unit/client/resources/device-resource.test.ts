@@ -1,46 +1,19 @@
-import axios from "axios";
 import nock from "nock";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { DeviceResource } from "@/client/resources/device-resource";
 import { withUdfMasking } from "@/logging/mask";
-import type { DattoLogger } from "@/logging/logger";
-import type { RateDescriptor } from "@/rate-limit/rate-limiter";
 import type { DeviceUdfInput } from "@/schema-overrides";
 
-const BASE_URL = "https://zinfandel-api.example.com";
+import {
+  BASE_URL,
+  createMockLogger,
+  createTrackedAxios,
+  makeResource as makeResourceOf,
+} from "./test-harness";
 
-function createMockLogger(): DattoLogger {
-  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-}
-
-function createTrackedAxios() {
-  const instance = axios.create({ baseURL: BASE_URL });
-  const descriptors: RateDescriptor[] = [];
-  instance.interceptors.request.use((config) => {
-    if (config.rateDescriptor) {
-      descriptors.push(config.rateDescriptor);
-    }
-    return config;
-  });
-  return { instance, descriptors };
-}
-
-function makeResource(logger: DattoLogger = createMockLogger()) {
-  const { instance, descriptors } = createTrackedAxios();
-  return {
-    resource: new DeviceResource(instance, logger),
-    descriptors,
-    logger,
-  };
+function makeResource(logger = createMockLogger()) {
+  return makeResourceOf(DeviceResource, logger);
 }
 
 describe("DeviceResource", () => {
@@ -171,19 +144,48 @@ describe("DeviceResource", () => {
     ).rejects.toMatchObject({ name: "DattoValidationError", stage: "request" });
   });
 
-  it("setUdf()'s masked logger never leaks a raw UDF value while diagnosing a leniency event (R20 end-to-end)", async () => {
-    // A response carrying an unmasked/unknown key exercises a leniency diagnostic whose `meta`
-    // must still never carry a raw UDF value — the masking decorator is the single boundary.
+  it("routes a real leniency diagnostic through the constructor-injected masked logger, which still masks a raw UDF value logged through that same instance (R20 end-to-end)", async () => {
+    // `setUdf()`'s own response is validated against `voidResponseSchema` (`z.unknown()`), whose
+    // `cleanAndDiagnoseResponse` default case never records a diagnostic — there is no leniency
+    // event this specific write can ever produce for `parseLenient` to log, with or without
+    // masking (confirmed: `DiagnosticsCollector.flush` only emits when a group was recorded), so
+    // it cannot itself organically drive a log call. `get()`'s response, by contrast, is
+    // validated against the real reconciled `Device` schema, so a genuinely unrecognized
+    // top-level property organically produces a real "stripped unknown response property"
+    // `debug` call through the actual `BaseResource` → `parseLenient` path — proving the
+    // constructor-injected `maskedLogger`, not some other unwrapped logger, is what `BaseResource`
+    // actually logs through.
     nock(BASE_URL)
-      .post("/api/v2/device/dev-1/udf", { udf5: "S3CR3T-VALUE" })
-      .reply(200, { udf: { udf1: "S3CR3T-VALUE" }, extra: "stripped" });
+      .get("/api/v2/device/dev-1")
+      .reply(200, {
+        uid: "dev-1",
+        udf: { udf1: "S3CR3T-VALUE" },
+        somethingUnrecognized: "triggers a real leniency diagnostic",
+      });
     const sink = createMockLogger();
     const maskedLogger = withUdfMasking(sink);
     const { instance } = createTrackedAxios();
     const resource = new DeviceResource(instance, maskedLogger);
 
-    await resource.setUdf("dev-1", { udf5: "S3CR3T-VALUE" });
+    await resource.get("dev-1");
 
+    expect(sink.debug).toHaveBeenCalledWith(
+      "stripped unknown response property",
+      expect.objectContaining({ field: "somethingUnrecognized" }),
+    );
+
+    // That real diagnostic never carries `udf`'s own value (schema-leniency deliberately omits a
+    // stripped key's value — see `objectCatchall`'s doc), so it alone can't prove masking
+    // actually redacts a UDF value. Confirm the same `maskedLogger` reference `BaseResource` just
+    // logged through still does: a raw UDF value logged through it comes out redacted, never raw.
+    maskedLogger.debug("simulated leniency diagnostic", {
+      udf1: "S3CR3T-VALUE",
+    });
+
+    expect(sink.debug).toHaveBeenLastCalledWith(
+      "simulated leniency diagnostic",
+      { udf1: expect.stringMatching(/^\[redacted - \d+ characters\]$/) },
+    );
     for (const method of ["debug", "info", "warn", "error"] as const) {
       for (const call of (sink[method] as ReturnType<typeof vi.fn>).mock
         .calls) {

@@ -16,9 +16,19 @@ import { type Lenient, parseLenient } from "../../validation/schema-leniency";
  * deviceResponseSchema>`, which still carries the *closed*, pre-graft enum types for
  * `deviceClass`/`antivirus`/`patchManagement`) and the **exported** entity type it backs (`Device`,
  * `src/schema-overrides/types.ts`, which grafts on the codemod-widened open-enum subtrees — see
- * that module's doc). A resource method (Phase 7/8) declaring `Promise<Device>` passes
- * `coerceSchema<Device>(deviceResponseSchema)` to `httpGet`/`httpPost`/etc. so the primitive's
- * generic response type matches the method's own declared return type.
+ * that module's doc). `schema-overrides/types.ts` performs exactly this cast (inline, as `schema
+ * as unknown as z.ZodType<Device>`, rather than importing this helper — that module sits *below*
+ * `client/resources` in this codebase's dependency direction, so importing from here would invert
+ * it) to bind `deviceSchema`/`alertSchema` to their reconciled types; this export remains
+ * available for any future reconciled entity that doesn't get its own named schema binding there.
+ *
+ * **This narrows only the schema's own declared type, not `BaseResource`'s `Lenient<T>`
+ * wrapper.** Every `http*` primitive still returns `Lenient<T>` around whatever type its schema
+ * argument claims — `this.httpGet(path, coerceSchema<Device>(deviceResponseSchema), ctx)` yields
+ * `Promise<Lenient<Device>>`, not `Promise<Device>`. A resource method that wants its own clean
+ * declared return type re-asserts that separately, at its own return site, via `narrow<T>`
+ * (`./narrow.ts`) — the two helpers are not interchangeable and do not compete for the same job:
+ * this one retypes a *schema*, `narrow` retypes an already-`Lenient`-wrapped *value*.
  *
  * Runtime validation is unaffected — `.safeParse`/`parseLenient` always run against the real
  * schema; only the compile-time type assertion changes.
@@ -384,8 +394,9 @@ export abstract class BaseResource {
    * itself established for `parseLenient` (a `T`-typed field silently admitting `null` at runtime
    * is exactly the defect `Lenient<T>` exists to surface at compile time, not hide again one layer
    * up). A resource method (Phase 7/8) that wants its own declared return type to be the clean
-   * `Device`/`Alert`/etc. shape re-asserts that explicitly at its own return site — the same kind
-   * of documented, intentional cast `coerceSchema` already names elsewhere in this file — so the
+   * `Device`/`Alert`/etc. shape re-asserts that explicitly at its own return site via `narrow<T>`
+   * (`./narrow.ts`) — a documented, intentional cast, the value-level counterpart to this file's
+   * own `coerceSchema` (which retypes a *schema*, not an already-`Lenient`-wrapped value) — so the
    * narrowing is visible at the one place it is actually applied, not buried in this shared
    * primitive every resource method funnels through.
    *

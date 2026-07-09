@@ -1,5 +1,5 @@
 import nock from "nock";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { AccountResource } from "@/client/resources/account-resource";
 import { AlertResource } from "@/client/resources/alert-resource";
@@ -67,7 +67,7 @@ describe("DattoRmmClient (Phase 7 scaffold — account/sites/devices/alerts/jobs
     ).toThrow(expect.objectContaining({ name: "DattoValidationError" }));
   });
 
-  it("end-to-end: a mounted resource's call fetches an auth token, attaches Authorization, and honors the read rate limit through the real transport stack", async () => {
+  it("end-to-end: a mounted resource's call fetches an auth token and attaches Authorization through the real transport stack", async () => {
     const tokenScope = nock(BASE_URL)
       .post(GRANT_PATH)
       .reply(200, { access_token: "tok-1", expires_in: 3600 });
@@ -86,5 +86,45 @@ describe("DattoRmmClient (Phase 7 scaffold — account/sites/devices/alerts/jobs
     expect(capturedAuth).toBe("Bearer tok-1");
     expect(tokenScope.isDone()).toBe(true);
     expect(deviceScope.isDone()).toBe(true);
+  });
+
+  it("end-to-end: a mounted resource's read call is throttled by the real rate limiter through the actual transport stack once the configured read window is exhausted", async () => {
+    vi.useFakeTimers();
+    try {
+      nock(BASE_URL)
+        .post(GRANT_PATH)
+        .reply(200, { access_token: "tok-1", expires_in: 3600 });
+      const deviceScope = nock(BASE_URL)
+        .get("/api/v2/device/dev-1")
+        .times(2)
+        .reply(200, { uid: "dev-1", hostname: "PC1" });
+
+      const client = new DattoRmmClient(
+        config({ rateLimit: { readLimit: 1, windowSeconds: 1 } }),
+      );
+
+      // Consumes the read window's only slot.
+      await client.devices.get("dev-1");
+
+      let secondResolved = false;
+      const second = client.devices.get("dev-1").then((device) => {
+        secondResolved = true;
+        return device;
+      });
+
+      // Not yet available: the second read must wait for the 1s window to roll, proving this
+      // call was actually handed to the real rate limiter rather than sent straight through.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(secondResolved).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      const secondDevice = await second;
+
+      expect(secondResolved).toBe(true);
+      expect(secondDevice).toEqual({ uid: "dev-1", hostname: "PC1" });
+      expect(deviceScope.isDone()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

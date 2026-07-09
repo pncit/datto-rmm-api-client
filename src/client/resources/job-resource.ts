@@ -15,9 +15,17 @@ import type { JobStdData } from "../../generated/types/jobStdData";
 import { BaseResource } from "./base-resource";
 import { narrow } from "./narrow";
 
-/** `GET /api/v2/job/{uid}/components`'s item schema (`JobComponent`, with its nested
+/**
+ * `GET /api/v2/job/{uid}/components`'s item schema (`JobComponent`, with its nested
  * `JobComponentVariable[]`). No UDF/alertContext/enum defect to reconcile — a plain mirror of
- * the generated shape, scoped to this resource file since nothing else in this phase shares it. */
+ * the generated shape, scoped to this resource file since nothing else in this phase shares it.
+ *
+ * Exported only so `tests/generated/schema-mirror-pin.ts` can pin it against `JobComponent` — not
+ * resource API. Phase 8's `src/index.ts` barrel must export only the `*Resource` classes and
+ * `DattoRmmClient`, never `export *` from this module, so this stays out of the published surface.
+ *
+ * @internal
+ */
 export const jobComponentSchema = z.object({
   uid: z.string().optional(),
   name: z.string().optional(),

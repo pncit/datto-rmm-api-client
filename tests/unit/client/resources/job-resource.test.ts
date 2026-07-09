@@ -1,41 +1,12 @@
-import axios from "axios";
 import nock from "nock";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { JobResource } from "@/client/resources/job-resource";
-import type { DattoLogger } from "@/logging/logger";
-import type { RateDescriptor } from "@/rate-limit/rate-limiter";
 
-const BASE_URL = "https://zinfandel-api.example.com";
-
-function createMockLogger(): DattoLogger {
-  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-}
-
-function createTrackedAxios() {
-  const instance = axios.create({ baseURL: BASE_URL });
-  const descriptors: RateDescriptor[] = [];
-  instance.interceptors.request.use((config) => {
-    if (config.rateDescriptor) {
-      descriptors.push(config.rateDescriptor);
-    }
-    return config;
-  });
-  return { instance, descriptors };
-}
+import { BASE_URL, makeResource as makeResourceOf } from "./test-harness";
 
 function makeResource() {
-  const { instance, descriptors } = createTrackedAxios();
-  const logger = createMockLogger();
-  return { resource: new JobResource(instance, logger), descriptors, logger };
+  return makeResourceOf(JobResource);
 }
 
 describe("JobResource", () => {

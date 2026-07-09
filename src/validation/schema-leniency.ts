@@ -94,7 +94,7 @@ function objectShape(schema: z.ZodType): Record<string, z.ZodType> {
  * — that wrapped copy is never what this function reads.
  */
 function objectCatchall(schema: z.ZodType): z.ZodType | undefined {
-  const catchall = (schema as any)._zod.def.catchall as z.ZodType | undefined;
+  const catchall = getDef(schema).catchall as z.ZodType | undefined;
   return catchall && getDef(catchall).type !== "never" ? catchall : undefined;
 }
 

@@ -23,10 +23,18 @@ import { narrow } from "./narrow";
 import { variableSchema } from "./variable-schema";
 import { voidResponseSchema } from "./void-response";
 
-/** `GET /api/v2/account/components`'s item schema (`Component`, with its nested
+/**
+ * `GET /api/v2/account/components`'s item schema (`Component`, with its nested
  * `ComponentVariable[]`). No UDF/alertContext/enum defect to reconcile — a plain mirror of the
  * generated shape, scoped to this resource file since (unlike `Variable`) no other Phase 7
- * resource shares it. */
+ * resource shares it.
+ *
+ * Exported only so `tests/generated/schema-mirror-pin.ts` can pin it against `Component` — not
+ * resource API. Phase 8's `src/index.ts` barrel must export only the `*Resource` classes and
+ * `DattoRmmClient`, never `export *` from this module, so this stays out of the published surface.
+ *
+ * @internal
+ */
 export const componentSchema = z.object({
   id: z.number().optional(),
   credentialsRequired: z.boolean().optional(),
@@ -48,8 +56,16 @@ export const componentSchema = z.object({
     .optional(),
 });
 
-/** `GET /api/v2/account/dnet-site-mappings`'s item schema (`DnetSiteMappingsDto`). Scoped to
- * this resource file — not shared elsewhere in this phase. */
+/**
+ * `GET /api/v2/account/dnet-site-mappings`'s item schema (`DnetSiteMappingsDto`). Scoped to
+ * this resource file — not shared elsewhere in this phase.
+ *
+ * Exported only so `tests/generated/schema-mirror-pin.ts` can pin it against `DnetSiteMappingsDto`
+ * — not resource API; see {@link componentSchema}'s doc for the barrel-leak constraint this must
+ * honor.
+ *
+ * @internal
+ */
 export const dnetSiteMappingSchema = z.object({
   id: z.number().optional(),
   uid: z.string().optional(),

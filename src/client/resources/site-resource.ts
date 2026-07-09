@@ -41,6 +41,13 @@ import { voidResponseSchema } from "./void-response";
  * `devices()`/`account.devices()`: it carries a network-interface list, not UDFs/audit/patch
  * data). No UDF/alertContext/enum defect of its own to reconcile — a plain mirror of the
  * generated shape, scoped to this resource file since nothing else in this phase shares it.
+ *
+ * Exported only so `tests/generated/schema-mirror-pin.ts` can pin it against
+ * `DeviceNetworkInterface` — not resource API. Phase 8's `src/index.ts` barrel must export only
+ * the `*Resource` classes and `DattoRmmClient`, never `export *` from this module, so this stays
+ * out of the published surface.
+ *
+ * @internal
  */
 export const deviceNetworkInterfaceSchema = z.object({
   id: z.number().optional(),
@@ -74,7 +81,14 @@ export const deviceNetworkInterfaceSchema = z.object({
  * those two account-wide filter catalogs). `type` is a real spec enum (`FilterType`); no override
  * is needed for it to widen at runtime — `parseLenient`'s enum degradation (Phase 4) applies to
  * every enum node this client validates, independent of whether the entity is otherwise
- * reconciled in `schema-overrides/`. */
+ * reconciled in `schema-overrides/`.
+ *
+ * Exported only so `tests/generated/schema-mirror-pin.ts` can pin it against `Filter` — not
+ * resource API; see {@link deviceNetworkInterfaceSchema}'s doc for the barrel-leak constraint
+ * this must honor.
+ *
+ * @internal
+ */
 export const filterSchema = z.object({
   id: z.number().optional(),
   name: z.string().optional(),

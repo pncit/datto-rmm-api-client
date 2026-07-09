@@ -9,22 +9,26 @@
  * Each hand-written schema is a plain mirror of a generated shape (no R8-style reconciliation
  * needed — see each schema's own doc), asserted via `narrow<T>` at its call site with nothing
  * binding the schema to the type. Because `parseLenient` strips unknown keys, a spec regeneration
- * that adds a field to one of these entities would otherwise silently drop that field from the
- * returned value while the declared return type still claims it, undetected by any test or the
- * typechecker. This file is that guard: it fails `npm run typecheck` the moment a schema's key set
- * diverges from its generated type's key set.
+ * that adds a field to one of these entities — or changes an existing field's type — would
+ * otherwise silently drop or mis-coerce that field at runtime while the declared return type still
+ * claims the old shape, undetected by any test or the typechecker. This file is that guard.
  *
- * **Key-set equality, not full deep equality:** a naive `Equal<z.infer<typeof schema>, T>` pin
- * would fail *today*, independent of any future drift, for `Filter`/`filterSchema` — the
- * response-enum-widening codemod (Phase 2) widens `Filter["type"]` to
- * `FilterType | (string & {})`, while `filterSchema`'s `z.enum([...])` is authored closed; the
+ * **Full structural equality for five of the six, key-set equality for the sixth:** a naive
+ * `Equal<z.infer<typeof schema>, T>` pin would fail *today*, independent of any future drift, for
+ * `Filter`/`filterSchema` — the response-enum-widening codemod (Phase 2) widens `Filter["type"]`
+ * to `FilterType | (string & {})`, while `filterSchema`'s `z.enum([...])` is authored closed; the
  * widening that reconciles the two happens only at runtime (`parseLenient`'s recursive walk over
  * the schema tree, Phase 4), which does not change `z.infer`'s compile-time result. That
  * open-enum/closed-enum asymmetry is already covered generically for every entity by
- * `Lenient<T>` and `lenient-type-pin.ts`, so re-proving it per schema here would be redundant.
- * What this file guards instead — and the specific hazard the missing-guard finding names — is a
- * field silently added or removed upstream, which a key-set comparison catches directly without
- * fighting the enum-widening type mismatch.
+ * `Lenient<T>` and `lenient-type-pin.ts`, so re-proving it per schema here would be redundant —
+ * `Filter` alone uses the weaker key-set-only comparison, scoped to that one documented asymmetry.
+ * `Component`, `DnetSiteMappingsDto`, `DeviceNetworkInterface`, `JobComponent`, and `Variable`
+ * carry no enum field at all (verified against their generated types, including every nested
+ * object — `ComponentVariable`, `NetworkInterface`, `DevicesType`, `JobComponentVariable`), so
+ * each of those five uses a full `Equal<T, z.infer<typeof schema>>` pin instead, which — unlike
+ * key-set equality — also fails the moment a same-named field's *type* changes (e.g. a spec
+ * regeneration turning `Component.id` from `number` to `string`), not just when a field is added
+ * or removed.
  *
  * Picked up directly by `tsconfig.test.json`'s `include: ["tests/**\/*.ts", ...]` glob, alongside
  * `lenient-type-pin.ts`; contains no runtime assertions and is never imported by a `*.test.ts` file.
@@ -53,28 +57,26 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (
 /** Fails to compile unless its argument is the literal type `true`. */
 type Expect<T extends true> = T;
 
-// Each pin below asserts the generated type's field names and the hand-written schema's
-// inferred field names are exactly the same set (order-independent) — a field added to or
-// removed from either side fails `npm run typecheck`.
+// The five enum-free mirrors are pinned by full structural equality — a field being added,
+// removed, or changing type on either side fails `npm run typecheck`.
 
-type _ComponentKeys = Expect<
-  Equal<keyof Component, keyof z.infer<typeof componentSchema>>
+type _Component = Expect<Equal<Component, z.infer<typeof componentSchema>>>;
+type _DnetSiteMappingsDto = Expect<
+  Equal<DnetSiteMappingsDto, z.infer<typeof dnetSiteMappingSchema>>
 >;
-type _DnetSiteMappingsKeys = Expect<
-  Equal<keyof DnetSiteMappingsDto, keyof z.infer<typeof dnetSiteMappingSchema>>
->;
-type _DeviceNetworkInterfaceKeys = Expect<
+type _DeviceNetworkInterface = Expect<
   Equal<
-    keyof DeviceNetworkInterface,
-    keyof z.infer<typeof deviceNetworkInterfaceSchema>
+    DeviceNetworkInterface,
+    z.infer<typeof deviceNetworkInterfaceSchema>
   >
 >;
+type _JobComponent = Expect<
+  Equal<JobComponent, z.infer<typeof jobComponentSchema>>
+>;
+type _Variable = Expect<Equal<Variable, z.infer<typeof variableSchema>>>;
+
+// `Filter`/`filterSchema` alone stays key-set-only (see the file doc's Phase-2 enum-widening
+// asymmetry) — a field added to or removed from either side fails `npm run typecheck`.
 type _FilterKeys = Expect<
   Equal<keyof Filter, keyof z.infer<typeof filterSchema>>
->;
-type _JobComponentKeys = Expect<
-  Equal<keyof JobComponent, keyof z.infer<typeof jobComponentSchema>>
->;
-type _VariableKeys = Expect<
-  Equal<keyof Variable, keyof z.infer<typeof variableSchema>>
 >;
