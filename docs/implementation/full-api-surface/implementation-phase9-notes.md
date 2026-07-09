@@ -24,9 +24,18 @@
   shape-preservation, and idempotency behavior.
 
 **Explicitly Out-of-Scope:**
-- Any change to already-implemented source under `src/` — Phase 9 is purely additive (fixtures,
-  one new script, two new test files); nothing in Phases 1–8's own logic needed to change. Verified:
-  `git status` after this phase shows only new, untracked files — no tracked file was modified.
+- Any *behavioral* change to already-implemented source under `src/` — Phase 9 is additive
+  (fixtures, one new script, two new test files) plus, as of review round 2, one narrow,
+  documented exception: `src/logging/mask.ts` and `src/schema-overrides/device-overrides.ts` each
+  had their existing, unchanged `/^udf\d+$/` regex constant promoted from module-private to
+  exported (`UDF_KEY`, `UDF_KEY_PATTERN`; the latter re-exported from
+  `src/schema-overrides/index.ts`), to give the new
+  `tests/unit/security/udf-key-pattern-consistency.test.ts` a mechanical lockstep guard against
+  the sanitizer's own `SECRET_KEY_PATTERNS` (`architect-r1-f1`, review round 1). The regex literal
+  in both files is byte-for-byte unchanged and neither new export is re-exported from
+  `src/index.ts`, so no runtime behavior or public-package surface changed — but the "no tracked
+  `src/` file was touched" claim below no longer holds after that fix and is corrected accordingly.
+  Nothing in Phases 1–8's own *logic* needed to change.
 - README / maintainer runbook documentation of the sanitizer's usage (Phase 10 — this phase's own
   "Documentation" section is explicitly "None yet" in the plan).
 - An automated secret-content scanner over `spec/`/fixtures — the plan explicitly does not want
@@ -285,9 +294,13 @@ implementation decision, documented below rather than treated as a deviation.
 - `npx vitest run --coverage` — 96.31% statements / 90.8% branches / 98.17% functions overall (up
   from Phase 8's 95.88%/90.51%/98.17% — this phase's tests exercise several previously-uncovered
   `schema-leniency.ts` branches via `enumFieldPaths`/real fixture data).
-- `npm run build` — `tsup` succeeds, unaffected by this phase (no `src/` change).
+- `npm run build` — `tsup` succeeds; behaviorally unaffected by this phase (the round-2
+  `src/logging/mask.ts`/`src/schema-overrides/device-overrides.ts`/`src/schema-overrides/index.ts`
+  edits only add exports of already-existing, unchanged regex constants — see §1/§13 — and neither
+  is re-exported from `src/index.ts`, so the built public surface is identical).
 - `npx prettier --check` — clean after one `--write` pass over the new files.
-- `git status` — only new, untracked files after this phase; no tracked file modified.
+- `git status` — after round 1, only new, untracked files; round 2 additionally modified three
+  tracked `src/` files (see §1/§13) to close `architect-r1-f1`.
 
 ---
 
@@ -295,8 +308,15 @@ implementation decision, documented below rather than treated as a deviation.
 
 I assert that:
 - Only Phase 9 has been implemented: the fixture corpus, the sanitization script, and the
-  fixture-validation test suite (including the `WIDENED_FIELDS` completeness guard) — no source
-  file under `src/` was touched.
+  fixture-validation test suite (including the `WIDENED_FIELDS` completeness guard). One narrow,
+  documented exception to "no source file under `src/` was touched" was made in review round 2:
+  `src/logging/mask.ts` and `src/schema-overrides/device-overrides.ts` each had their existing,
+  byte-for-byte-unchanged `/^udf\d+$/` regex constant promoted from module-private to exported
+  (plus the corresponding re-export in `src/schema-overrides/index.ts`), solely to give
+  `tests/unit/security/udf-key-pattern-consistency.test.ts` a build-breaking guard against
+  divergence between the at-rest sanitizer, the in-log masker, and the schema-shape override
+  (`architect-r1-f1`). No behavior changed and neither export reaches `src/index.ts`'s public
+  surface.
 - No unnecessary scope expansion occurred: README/runbook documentation (Phase 10) and live/real
   sweep validation (Deferred Validation) are untouched and out of scope.
 - All quality scores are ≥ 9.5.
