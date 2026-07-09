@@ -59,6 +59,10 @@ web_modules/
 # Optional REPL history
 .node_repl_history
 
+# Editor swap files
+*.swp
+*.swo
+
 # Output of 'npm pack'
 *.tgz
 
