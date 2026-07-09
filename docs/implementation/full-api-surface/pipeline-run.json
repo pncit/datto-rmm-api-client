@@ -7,6 +7,10 @@
       "implementation-auditor-r1-f2": "finding valid; gates have been corrected",
       "implementation-auditor-r1-f4": "finding valid, design and plan have been updated to match spec.",
       "implementation-auditor-r2-f1": "findings valid; plan updated"
+    },
+    "phase8:stepB": {
+      "architect-r1-f2": "Reword  design.md:452-454  to state that  src/index.ts  exports a curated subset of entity/response types re-exported by name from  public-types.ts  \u2014 never a wildcard re-export of the generated types \u2014 cross-referencing  plan.md:543-544 . This blocks only the design record's accuracy, not Phase 8's correctness, which is independently verified by surface-pin.ts 's compile-time pins and  surface.test.ts .",
+      "project-lead-r1-f1": "Correct  plan.md:531  from 'three' to 'four' (or name all four retired methods), add  invalidateToken  to  design.md 's Breaking Changes list, and record there the intentional/unintentional determination \u2014 so Phase 10's R18 migration guide has a complete, accurate retired-method list to write upgrade guidance from rather than discovering the fourth method while drafting docs. This blocks only the requirements record's completeness ahead of Phase 10; Phase 8's own code correctness is independently verified by  surface.test.ts 's absence assertion."
     }
   },
   "events": [
@@ -5015,6 +5019,174 @@
       },
       "session_id": "10505d69-9f2c-4f9a-a9f4-3fb0db1ab095",
       "turn": "docs/implementation/full-api-surface/review-phase8/project-lead-r1.md"
+    },
+    {
+      "t": 1783621474,
+      "kind": "worker",
+      "agent": "implementor",
+      "label": "phase8:stepB reviser r3",
+      "ok": true,
+      "started_at": "2026-07-09T18:17:41+00:00",
+      "duration_s": 413.7,
+      "api_duration_s": 324.6,
+      "turns": 60,
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "cost_usd": 1.727,
+      "tokens": {
+        "input": 5033,
+        "output": 25606,
+        "cache_read": 2847237,
+        "cache_creation": 78934
+      },
+      "session_id": "e5ed7800-20a8-4bf8-86a4-1c57d1779322",
+      "turn": "docs/implementation/full-api-surface/review-phase8/reviser-r3.md"
+    },
+    {
+      "t": 1783621550,
+      "kind": "worker",
+      "agent": "mediator",
+      "label": "phase8:stepB mediator r3",
+      "ok": true,
+      "started_at": "2026-07-09T18:24:34+00:00",
+      "duration_s": 76.1,
+      "api_duration_s": 68.3,
+      "turns": 10,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.3635,
+      "tokens": {
+        "input": 680,
+        "output": 4827,
+        "cache_read": 63089,
+        "cache_creation": 20793
+      },
+      "session_id": "ad941eef-5a57-4f79-a1bb-c843c9a9dc01",
+      "turn": "docs/implementation/full-api-surface/review-phase8/mediator-r3.md"
+    },
+    {
+      "t": 1783624103,
+      "kind": "worker",
+      "agent": "implementation-auditor",
+      "label": "phase8:stepA implementation-auditor r4",
+      "ok": true,
+      "started_at": "2026-07-09T19:04:45+00:00",
+      "duration_s": 218.2,
+      "api_duration_s": 190.7,
+      "turns": 24,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.1308,
+      "tokens": {
+        "input": 700,
+        "output": 12138,
+        "cache_read": 474778,
+        "cache_creation": 58651
+      },
+      "session_id": "3d8d84d5-4e04-441d-882d-a316a5e5c94d",
+      "turn": "docs/implementation/full-api-surface/review-phase8/implementation-auditor-r4.md"
+    },
+    {
+      "t": 1783624124,
+      "kind": "gate",
+      "phase": 8,
+      "attempt": 1,
+      "result": "pass"
+    },
+    {
+      "t": 1783624236,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "phase8:stepB engineer r2",
+      "ok": true,
+      "started_at": "2026-07-09T19:08:44+00:00",
+      "duration_s": 111.7,
+      "api_duration_s": 99.1,
+      "turns": 25,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.8437,
+      "tokens": {
+        "input": 2259,
+        "output": 5724,
+        "cache_read": 317405,
+        "cache_creation": 53058
+      },
+      "session_id": "e1e0d6c4-39fc-46a8-8315-3cb1455b2556",
+      "turn": "docs/implementation/full-api-surface/review-phase8/engineer-r2.md"
+    },
+    {
+      "t": 1783624283,
+      "kind": "worker",
+      "agent": "typescript-cop",
+      "label": "phase8:stepB typescript-cop r2",
+      "ok": true,
+      "started_at": "2026-07-09T19:08:44+00:00",
+      "duration_s": 159.5,
+      "api_duration_s": 129.3,
+      "turns": 38,
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "cost_usd": 0.9497,
+      "tokens": {
+        "input": 1185,
+        "output": 8859,
+        "cache_read": 1104955,
+        "cache_creation": 80294
+      },
+      "session_id": "4165d35e-32e1-4b37-884d-cb0844cb4533",
+      "turn": "docs/implementation/full-api-surface/review-phase8/typescript-cop-r2.md"
+    },
+    {
+      "t": 1783624347,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "phase8:stepB architect r2",
+      "ok": true,
+      "started_at": "2026-07-09T19:08:44+00:00",
+      "duration_s": 223.0,
+      "api_duration_s": 212.4,
+      "turns": 28,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.0816,
+      "tokens": {
+        "input": 2553,
+        "output": 11159,
+        "cache_read": 426928,
+        "cache_creation": 57642
+      },
+      "session_id": "14a324b5-db6e-4ca2-bd8f-c40ed17a5da6",
+      "turn": "docs/implementation/full-api-surface/review-phase8/architect-r2.md"
+    },
+    {
+      "t": 1783624387,
+      "kind": "worker",
+      "agent": "project-lead",
+      "label": "phase8:stepB project-lead r2",
+      "ok": true,
+      "started_at": "2026-07-09T19:08:44+00:00",
+      "duration_s": 263.0,
+      "api_duration_s": 247.7,
+      "turns": 46,
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "cost_usd": 1.5654,
+      "tokens": {
+        "input": 1237,
+        "output": 18233,
+        "cache_read": 1939703,
+        "cache_creation": 117711
+      },
+      "session_id": "b946914a-6a20-4ec2-9e47-144b3f9ddb1e",
+      "turn": "docs/implementation/full-api-surface/review-phase8/project-lead-r2.md"
     }
   ],
   "invocation": {

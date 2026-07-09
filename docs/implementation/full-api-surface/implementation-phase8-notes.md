@@ -42,7 +42,7 @@ from the committed spec, not a hand-counted claim) rather than merely asserting 
 
 | File | Change Type | Rationale |
 |------|------------|-----------|
-| `src/client/resources/audit-resource.ts` | Created | `AuditResource`: `getPrinterAudit`/`getEsxiHostAudit`/`getDeviceAudit`/`getDeviceAuditSoftware`/`getDeviceAuditByMacAddress` |
+| `src/client/resources/audit-resource.ts` | Created | `AuditResource`: `getPrinter`/`getEsxiHost`/`getDevice`/`getDeviceSoftware`/`getDeviceByMacAddress` |
 | `src/client/resources/filter-resource.ts` | Created | `FilterResource`: `defaults`/`custom` |
 | `src/client/resources/user-resource.ts` | Created | `UserResource`: `list` (`GET /account/users`, deferred from Phase 7), `resetKeys` |
 | `src/client/resources/activity-log-resource.ts` | Created | `ActivityLogResource`: `list` |
@@ -53,6 +53,9 @@ from the committed spec, not a hand-counted claim) rather than merely asserting 
 | `src/index.ts` | Rewritten | New public barrel: `createDattoRmmClient`, `DattoRmmClient`, config/logger types, error hierarchy, `./public-types` |
 | `src/client/datto-rmm-client.ts` | Modified | Mounts the five new namespaces; adds `createDattoRmmClient(config)` |
 | `src/client/resources/site-resource.ts` | Modified | Removed local `filterSchema`; imports the shared one (§5 Deviation 1) |
+| `src/rate-limit/rate-limits.ts` | Modified | Dropped the dead `filter-create`/`filter-delete` `WriteOpKey` entries (this directory's `implementation-auditor-r1-f3`; `FilterResource` has no write operations) |
+| `src/client/resources/base-resource.ts` | Modified (doc only) | Reworded `httpDelete`'s doc example off the removed `filter-delete` opKey to the real `SiteResource.deleteVariable`/`deleteProxy` call sites (same fix) |
+| `tests/unit/client/base-resource.test.ts` | Modified | Retargeted the generic `httpDelete` tagging test from the placeholder `"filter-delete"` opKey to the real `"site-variable-set"` opKey against `SiteResource.deleteVariable`'s path (same fix) |
 | `src/auth/auth-manager.ts` | Modified (doc only) | Reworded one doc line to drop a literal `Result<T>` mention (§5 Deviation 2) |
 | `tsconfig.json`, `tsconfig.test.json`, `vitest.config.ts`, `eslint.config.js` | Modified | Removed dead `src/__tests__` references now that the directory is deleted (§5 Deviation 3) |
 | `tests/generated/schema-mirror-pin.ts` | Modified | Updated `filterSchema`'s import path; added `Software`/`AuthUser`/`ActivityLog` pins |
@@ -192,8 +195,8 @@ operationId) is documented in-place in the relevant class's own JSDoc.
 
 ## 7. Tests
 
-- **`audit-resource.test.ts`** (5): every method's path/verb; `getDeviceAuditByMacAddress`'s
-  per-item drop (R7); `getDeviceAuditSoftware`'s pagination.
+- **`audit-resource.test.ts`** (5): every method's path/verb; `getDeviceByMacAddress`'s
+  per-item drop (R7); `getDeviceSoftware`'s pagination.
 - **`filter-resource.test.ts`** (2): both methods' path/verb; `custom()`'s unobserved-`type`
   widening (R5).
 - **`user-resource.test.ts`** (2): `list()`'s pagination and epoch-ms timestamp fields;

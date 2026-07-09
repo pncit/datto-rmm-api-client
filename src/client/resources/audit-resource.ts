@@ -35,14 +35,19 @@ export const softwareSchema = z.object({
  * audit-fetch read, genuinely tagged `-v2-audit` in the committed spec — no cross-tag rehoming
  * here (unlike `alerts`).
  *
- * Each device-class-specific audit read (`getPrinterAudit`/`getEsxiHostAudit`/`getDeviceAudit`)
- * validates against its own distinct generated response schema — the spec models printer/ESXi/
+ * Each device-class-specific audit read (`getPrinter`/`getEsxiHost`/`getDevice`) validates
+ * against its own distinct generated response schema — the spec models printer/ESXi/
  * generic-device audit data as three unrelated shapes, not one polymorphic entity, so there is no
  * shared item schema to factor out here the way `Device`/`Filter`/`Variable` are shared elsewhere.
+ *
+ * Method names drop the redundant `Audit` noun the namespace already supplies (the `filters`
+ * namespace's `defaults()`/`custom()` establish the same convention for this phase), matching the
+ * codebase-wide pattern of `client.jobs.getComponents()`/`getResults()` and
+ * `client.devices.getByMacAddress()` over a namespace-repeating name.
  */
 export class AuditResource extends BaseResource {
   /** `GET /api/v2/audit/printer/{deviceUid}` — audit data for a printer-class device. */
-  async getPrinterAudit(deviceUid: string): Promise<PrinterAudit> {
+  async getPrinter(deviceUid: string): Promise<PrinterAudit> {
     const result = await this.httpGet(
       `/api/v2/audit/printer/${deviceUid}`,
       getPrinterAuditResponse,
@@ -52,7 +57,7 @@ export class AuditResource extends BaseResource {
   }
 
   /** `GET /api/v2/audit/esxihost/{deviceUid}` — audit data for an esxihost-class device. */
-  async getEsxiHostAudit(deviceUid: string): Promise<ESXiHostAudit> {
+  async getEsxiHost(deviceUid: string): Promise<ESXiHostAudit> {
     const result = await this.httpGet(
       `/api/v2/audit/esxihost/${deviceUid}`,
       getEsxiHostAuditResponse,
@@ -62,7 +67,7 @@ export class AuditResource extends BaseResource {
   }
 
   /** `GET /api/v2/audit/device/{deviceUid}` — audit data for a generic (device-class) device. */
-  async getDeviceAudit(deviceUid: string): Promise<DeviceAudit> {
+  async getDevice(deviceUid: string): Promise<DeviceAudit> {
     const result = await this.httpGet(
       `/api/v2/audit/device/${deviceUid}`,
       getDeviceAuditResponse,
@@ -73,7 +78,7 @@ export class AuditResource extends BaseResource {
 
   /** `GET /api/v2/audit/device/{deviceUid}/software` — the device's audited software inventory,
    * fully paginated. */
-  async getDeviceAuditSoftware(
+  async getDeviceSoftware(
     deviceUid: string,
     params?: GetDeviceAuditSoftwareParams,
   ): Promise<Software[]> {
@@ -91,9 +96,7 @@ export class AuditResource extends BaseResource {
    * zero or one) matching the given MAC address, mirroring `DeviceResource.getByMacAddress`'s
    * shape. A bare, non-paginated top-level array, so this uses `httpGetArray` rather than
    * `paginate` — per-item leniency without a cursor. */
-  async getDeviceAuditByMacAddress(
-    macAddress: string,
-  ): Promise<DeviceAudit[]> {
+  async getDeviceByMacAddress(macAddress: string): Promise<DeviceAudit[]> {
     const result = await this.httpGetArray(
       `/api/v2/audit/device/macAddress/${macAddress}`,
       getDeviceAuditByMacAddressResponseItem,

@@ -27,7 +27,7 @@ import type { ProblemError } from "../../src/index";
 // the hand-curated `src/public-types.ts` list is exported. `VariableCreationRequest`/
 // `GetDeviceAuditByMacAddressParams` are real generated-only types no resource method's public
 // signature uses directly (variable creates take the reconciled `*VariableCreateInput` types
-// instead; `getDeviceAuditByMacAddress` takes a bare `macAddress: string`, not a params object) —
+// instead; `getDeviceByMacAddress` takes a bare `macAddress: string`, not a params object) —
 // deliberately absent from `public-types.ts`, so a stray `export * from './generated/types'` is
 // exactly what would make these two imports newly (and wrongly) succeed.
 // @ts-expect-error VariableCreationRequest is a raw generated type, not curated for the public surface.

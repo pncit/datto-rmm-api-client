@@ -85,8 +85,18 @@ export const OPERATION_MAP: readonly OperationMapEntry[] = [
     ns: "account",
     method: "dnetSiteMappings",
   },
-  { specMethod: "get", specPath: "/v2/account/sites", ns: "sites", method: "list" },
-  { specMethod: "get", specPath: "/v2/account/users", ns: "users", method: "list" },
+  {
+    specMethod: "get",
+    specPath: "/v2/account/sites",
+    ns: "sites",
+    method: "list",
+  },
+  {
+    specMethod: "get",
+    specPath: "/v2/account/users",
+    ns: "users",
+    method: "list",
+  },
   {
     specMethod: "get",
     specPath: "/v2/account/variables",
@@ -121,7 +131,12 @@ export const OPERATION_MAP: readonly OperationMapEntry[] = [
   },
 
   // alert (-v2-alert tag) — 4 operations, genuinely tagged alert
-  { specMethod: "get", specPath: "/v2/alert/{alertUid}", ns: "alerts", method: "get" },
+  {
+    specMethod: "get",
+    specPath: "/v2/alert/{alertUid}",
+    ns: "alerts",
+    method: "get",
+  },
   {
     specMethod: "post",
     specPath: "/v2/alert/{alertUid}/mute",
@@ -146,31 +161,31 @@ export const OPERATION_MAP: readonly OperationMapEntry[] = [
     specMethod: "get",
     specPath: "/v2/audit/device/macAddress/{macAddress}",
     ns: "audit",
-    method: "getDeviceAuditByMacAddress",
+    method: "getDeviceByMacAddress",
   },
   {
     specMethod: "get",
     specPath: "/v2/audit/device/{deviceUid}",
     ns: "audit",
-    method: "getDeviceAudit",
+    method: "getDevice",
   },
   {
     specMethod: "get",
     specPath: "/v2/audit/device/{deviceUid}/software",
     ns: "audit",
-    method: "getDeviceAuditSoftware",
+    method: "getDeviceSoftware",
   },
   {
     specMethod: "get",
     specPath: "/v2/audit/esxihost/{deviceUid}",
     ns: "audit",
-    method: "getEsxiHostAudit",
+    method: "getEsxiHost",
   },
   {
     specMethod: "get",
     specPath: "/v2/audit/printer/{deviceUid}",
     ns: "audit",
-    method: "getPrinterAudit",
+    method: "getPrinter",
   },
 
   // device (-v2-device tag) — 9 operations, two rehomed to alerts (concept-over-tag grouping)
@@ -186,7 +201,12 @@ export const OPERATION_MAP: readonly OperationMapEntry[] = [
     ns: "devices",
     method: "getByMacAddress",
   },
-  { specMethod: "get", specPath: "/v2/device/{deviceUid}", ns: "devices", method: "get" },
+  {
+    specMethod: "get",
+    specPath: "/v2/device/{deviceUid}",
+    ns: "devices",
+    method: "get",
+  },
   {
     specMethod: "get",
     specPath: "/v2/device/{deviceUid}/alerts/open",
@@ -239,7 +259,12 @@ export const OPERATION_MAP: readonly OperationMapEntry[] = [
   },
 
   // job (-v2-job tag) — 5 operations, all genuinely tagged job
-  { specMethod: "get", specPath: "/v2/job/{jobUid}", ns: "jobs", method: "get" },
+  {
+    specMethod: "get",
+    specPath: "/v2/job/{jobUid}",
+    ns: "jobs",
+    method: "get",
+  },
   {
     specMethod: "get",
     specPath: "/v2/job/{jobUid}/components",
@@ -279,7 +304,12 @@ export const OPERATION_MAP: readonly OperationMapEntry[] = [
     ns: "sites",
     method: "deleteVariable",
   },
-  { specMethod: "get", specPath: "/v2/site/{siteUid}", ns: "sites", method: "get" },
+  {
+    specMethod: "get",
+    specPath: "/v2/site/{siteUid}",
+    ns: "sites",
+    method: "get",
+  },
   {
     specMethod: "get",
     specPath: "/v2/site/{siteUid}/alerts/open",
@@ -322,7 +352,12 @@ export const OPERATION_MAP: readonly OperationMapEntry[] = [
     ns: "sites",
     method: "variables",
   },
-  { specMethod: "post", specPath: "/v2/site/{siteUid}", ns: "sites", method: "update" },
+  {
+    specMethod: "post",
+    specPath: "/v2/site/{siteUid}",
+    ns: "sites",
+    method: "update",
+  },
   {
     specMethod: "post",
     specPath: "/v2/site/{siteUid}/settings/proxy",
@@ -356,7 +391,12 @@ export const OPERATION_MAP: readonly OperationMapEntry[] = [
     ns: "system",
     method: "requestRate",
   },
-  { specMethod: "get", specPath: "/v2/system/status", ns: "system", method: "status" },
+  {
+    specMethod: "get",
+    specPath: "/v2/system/status",
+    ns: "system",
+    method: "status",
+  },
 
   // user (-v2-user tag) — 1 operation
   {

@@ -58,7 +58,12 @@ const SAMPLE_BODIES: Partial<Record<string, unknown>> = {
  * line reaching nock, not on response shape."
  */
 const GENERIC_RESPONSE = {
-  pageDetails: { count: 0, totalCount: 0, prevPageUrl: null, nextPageUrl: null },
+  pageDetails: {
+    count: 0,
+    totalCount: 0,
+    prevPageUrl: null,
+    nextPageUrl: null,
+  },
 };
 
 function config(): DattoRmmClientConfig {
@@ -125,40 +130,44 @@ describe("operation coverage against the committed spec (R1)", () => {
     nock.cleanAll();
   });
 
-  // Skips cleanly (rather than failing) if spec/openapi.json is absent — mirrors
-  // tests/generated/reproducibility.test.ts's fallback for an implementor environment with no
-  // committed spec.
-  it.skipIf(!specIsCommitted)(
-    "OPERATION_MAP covers every (method, path) declared in spec/openapi.json exactly once",
-    () => {
-      const spec = JSON.parse(readFileSync(SPEC_PATH, "utf8")) as {
-        paths: Record<string, Record<string, unknown>>;
-      };
+  // Fails loudly (rather than silently skipping) if spec/openapi.json is absent: R15 mandates the
+  // spec is committed, so a missing file here means a broken checkout, not a legitimate condition
+  // this completeness proof may quietly no-op under. (Unlike
+  // tests/generated/reproducibility.test.ts, which `skipIf`s a *live-egress* check that a
+  // committed-spec test has no analogous excuse to skip.)
+  it("OPERATION_MAP covers every (method, path) declared in spec/openapi.json exactly once", () => {
+    expect(
+      specIsCommitted,
+      `spec/openapi.json is missing at ${SPEC_PATH} — R15 requires it to be committed; this checkout is broken`,
+    ).toBe(true);
 
-      const specOps = new Set<string>();
-      for (const [path, methods] of Object.entries(spec.paths)) {
-        for (const method of Object.keys(methods)) {
-          if (!HTTP_METHODS.has(method)) continue;
-          specOps.add(`${method} ${path}`);
-        }
+    const spec = JSON.parse(readFileSync(SPEC_PATH, "utf8")) as {
+      paths: Record<string, Record<string, unknown>>;
+    };
+
+    const specOps = new Set<string>();
+    for (const [path, methods] of Object.entries(spec.paths)) {
+      for (const method of Object.keys(methods)) {
+        if (!HTTP_METHODS.has(method)) continue;
+        specOps.add(`${method} ${path}`);
       }
+    }
 
-      const mapOps = OPERATION_MAP.map(
-        (entry) => `${entry.specMethod} ${entry.specPath}`,
-      );
+    const mapOps = OPERATION_MAP.map(
+      (entry) => `${entry.specMethod} ${entry.specPath}`,
+    );
 
-      // Duplicate-free: a raw count could pass even if one namespace duplicated an operation
-      // while another omitted a different one.
-      expect(
-        mapOps.length,
-        "OPERATION_MAP has a duplicate (method, path) entry",
-      ).toBe(new Set(mapOps).size);
+    // Duplicate-free: a raw count could pass even if one namespace duplicated an operation
+    // while another omitted a different one.
+    expect(
+      mapOps.length,
+      "OPERATION_MAP has a duplicate (method, path) entry",
+    ).toBe(new Set(mapOps).size);
 
-      // Exact set equality against the spec's own authoritative inventory — no unmapped
-      // operation, no stale entry for a since-removed one.
-      expect([...new Set(mapOps)].sort()).toEqual([...specOps].sort());
-    },
-  );
+    // Exact set equality against the spec's own authoritative inventory — no unmapped
+    // operation, no stale entry for a since-removed one.
+    expect([...new Set(mapOps)].sort()).toEqual([...specOps].sort());
+  });
 
   it.each(OPERATION_MAP)(
     // A space (not a dot) separates $ns from $method: vitest's $prop title interpolation treats

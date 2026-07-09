@@ -188,7 +188,7 @@ type WriteSender = (
  *   `this.axios.put` directly — defeating the single-validated-primitive architecture this class
  *   exists to provide) or mis-sending them as `POST`/`PATCH` against a server that does not accept
  *   that verb for those paths. `httpPut` mirrors `httpPost`'s exact shape.
- * - `httpGetArray`. Four real R1 GET operations (`getByMacAddress`, `getDeviceAuditByMacAddress`,
+ * - `httpGetArray`. Four real R1 GET operations (`getByMacAddress`, `audit.getDeviceByMacAddress`,
  *   `getStdOut`, `getStdErr`) return a **bare, non-paginated top-level array** — neither a single
  *   value (`httpGet`'s shape) nor a `{pageDetails, <array>}` envelope (`paginate`'s shape). Routing
  *   one through `httpGet` with a `z.array(...)` schema would run lenient validation over the
