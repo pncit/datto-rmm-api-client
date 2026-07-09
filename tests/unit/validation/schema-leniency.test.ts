@@ -998,6 +998,61 @@ describe("parseLenient", () => {
       );
     });
 
+    it("reports total against every responseActions array examined across the page, for a widening two arrays deep", () => {
+      // Reproduces getDeviceResolvedAlertsResponse's real shape: { pageDetails, alerts: [ {
+      // priority, responseActions: [ { actionType } ] } ] } -- a widened `actionType` sits beneath
+      // *two* enclosing arrays (`alerts` and each alert's own `responseActions`). `total` must be
+      // the number of `responseActions` objects examined across the whole page (the sum of every
+      // alert's own `responseActions.length`), not the length of whichever alert's array happened
+      // to be walked last, and `count` must never exceed it.
+      const actionSchema = z.object({
+        actionType: z.enum(["reboot", "restart-service"]),
+      });
+      const alertSchema = z.object({
+        priority: z.enum(["high", "moderate", "low"]),
+        responseActions: z.array(actionSchema),
+      });
+      const schema = z.object({
+        pageDetails: z.object({ count: z.number() }),
+        alerts: z.array(alertSchema),
+      });
+
+      // 50 alerts with a single response action, 50 alerts with two -- 150 response actions
+      // examined in total; 3 of them (all inside 2-action alerts) carry an unobserved actionType.
+      const singleActionAlerts = Array.from({ length: 50 }, () => ({
+        priority: "high",
+        responseActions: [{ actionType: "reboot" }],
+      }));
+      const dualActionAlerts = Array.from({ length: 50 }, (_unused, i) => ({
+        priority: "moderate",
+        responseActions: [
+          { actionType: "restart-service" },
+          { actionType: i < 3 ? "quarantine-device" : "reboot" },
+        ],
+      }));
+      const data = {
+        pageDetails: { count: 100 },
+        alerts: [...singleActionAlerts, ...dualActionAlerts],
+      };
+      const { logger, debugMock } = createMockDebugLogger();
+
+      const result = parseLenient(schema, data, logger, "GET /alerts");
+
+      expect(result.success).toBe(true);
+      expect(debugMock).toHaveBeenCalledTimes(1);
+      expect(debugMock).toHaveBeenCalledWith(
+        "widened response enum",
+        expect.objectContaining({
+          field: "alerts.responseActions.actionType",
+          value: "quarantine-device",
+          count: 3,
+          total: 150,
+        }),
+      );
+      const [, meta] = debugMock.mock.calls[0] as [string, { count: number; total: number }];
+      expect(meta.count).toBeLessThanOrEqual(meta.total);
+    });
+
     it("reports distinct widened values as separate groups within the same aggregated call", () => {
       const itemSchema = z.object({
         deviceClass: z.enum(["device", "printer", "esxihost"]),

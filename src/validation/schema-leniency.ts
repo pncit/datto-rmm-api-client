@@ -21,11 +21,12 @@ import { DiagnosticsCollector } from "./diagnostics";
  * - **Aggregated, leveled diagnostics.** Rather than fuze-api's immediate per-occurrence `warn`,
  *   every diagnostic this module produces is benign (`debug`) and routed through a
  *   `DiagnosticsCollector` (`./diagnostics.ts`) that dedupes and summarizes per `parseLenient`
- *   call — see `detectUnknownProperties`'s module doc for why array element paths deliberately
- *   drop their index to make this aggregation actually collapse across a collection, and for how
- *   each diagnostic's `total` tracks the *enclosing* collection it was found in (not just the
- *   top-level response shape), so an enveloped list response (e.g. `{ pageDetails, devices }`)
- *   still reports `count`/`total` against `devices.length`, not `1`.
+ *   call — see `cleanAndDiagnoseResponse`'s doc for why array element paths deliberately drop
+ *   their index to make this aggregation actually collapse across a collection, and for how each
+ *   diagnostic's `total` is resolved against the number of items actually examined at that
+ *   field's structural position, accumulated across every iteration of every array that feeds it
+ *   — including one nested inside another (e.g. `alerts[i].responseActions[j].actionType`) — not
+ *   just the size of the nearest single array or the top-level response shape.
  *
  * All Zod v4 internal access is isolated here. No other module should read `_zod.def` directly.
  */
@@ -48,11 +49,77 @@ const wrappedSchemaCache = new WeakMap<z.ZodType, z.ZodType>();
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
+ * The minimal shape this module relies on out of Zod v4's untyped internal `_zod.def`. Every
+ * property beyond `type` still needs its own explicit cast at the call site (there are too many
+ * node-kind-specific shapes to model precisely here), but a renamed/missing property now
+ * surfaces as `undefined` through a typed, `unknown`-based path instead of compiling silently
+ * through a bare `any`.
+ */
+type ZodInternalDef = { readonly type: string } & Record<string, unknown>;
+
+/**
  * Access the Zod v4 internal `def` for a schema.
  * Zod v4 moved `_def` to `_zod.def`.
  */
-function getDef(schema: z.ZodType): any {
+function getDef(schema: z.ZodType): ZodInternalDef {
   return (schema as any)._zod.def;
+}
+
+/** A named object schema's field shape. Zod v4 exposes this as `.shape`, not through `_zod.def`. */
+function objectShape(schema: z.ZodType): Record<string, z.ZodType> {
+  return (schema as any).shape as Record<string, z.ZodType>;
+}
+
+/**
+ * The child schema(s) (and any other per-kind payload) each recognized `_zod.def` node kind
+ * carries, keyed by kind-specific slot name — `undefined` slots simply don't apply to whichever
+ * kind was passed in. This is the single place the zod-internal property name that holds each
+ * kind's children (`element`, `options`, `innerType`, `valueType`/`keyType`, `in`/`out`,
+ * `entries`) is read: `addCatchallRecursive`, `cleanAndDiagnoseResponse`, and `enumFieldPaths`'s
+ * `walk` all navigate a node's children through this rather than each repeating the same
+ * property-name lookups, so a Zod-internal rename or a new node kind needs updating in exactly
+ * one place, not three.
+ */
+function nodeChildren(def: ZodInternalDef): {
+  element?: z.ZodType;
+  options?: z.ZodType[];
+  innerType?: z.ZodType;
+  valueType?: z.ZodType;
+  keyType?: unknown;
+  pipeIn?: z.ZodType;
+  pipeOut?: z.ZodType;
+  defaultValue?: unknown;
+  enumValues?: string[];
+} {
+  switch (def.type) {
+    case "array":
+      return { element: def.element as z.ZodType };
+    case "union":
+      return { options: def.options as z.ZodType[] };
+    case "optional":
+    case "nullable":
+      return { innerType: def.innerType as z.ZodType };
+    case "default":
+      return {
+        innerType: def.innerType as z.ZodType,
+        defaultValue: def.defaultValue,
+      };
+    case "record":
+      return {
+        valueType: def.valueType as z.ZodType,
+        keyType: def.keyType,
+      };
+    case "pipe":
+      return { pipeIn: def.in as z.ZodType, pipeOut: def.out as z.ZodType };
+    case "enum":
+      return {
+        enumValues: Object.values(
+          (def.entries ?? {}) as Record<string, string>,
+        ),
+      };
+    default:
+      return {};
+  }
 }
 
 /**
@@ -68,11 +135,11 @@ function getDef(schema: z.ZodType): any {
  * union branch's own discriminator no longer required by the permissive parse, so a payload
  * matching no branch's real shape will match the first (now effectively all-optional) branch
  * instead of failing. This is sound only because no response schema under `src/generated/schemas/**`
- * declares a `z.union` today (verified by grep; Datto's spec has no `oneOf` response bodies). A
- * future spec refresh or hand-written override (`src/schema-overrides.ts`, Phase 6) that
- * introduces a response union would silently mismatch branches instead of failing — Phase 9's
- * schema-completeness audit should assert `src/generated/schemas/**` stays union-free so this
- * fails loudly if that ever changes.
+ * declares a `z.union` today. That invariant is not just a one-time verified assumption: it is
+ * enforced by `tests/generated/schema-union-freedom.test.ts`, which scans every generated
+ * `*.zod.ts` file for `zod.union(`/`zod.discriminatedUnion(` and fails the build the moment a
+ * future spec refresh or hand-written override (`src/schema-overrides.ts`, Phase 6) introduces
+ * one — at which point this function's blanket approach needs revisiting for that schema.
  */
 function toLenientField(fieldSchema: z.ZodType): z.ZodType {
   return fieldSchema.nullable().optional();
@@ -89,7 +156,7 @@ function toLenientField(fieldSchema: z.ZodType): z.ZodType {
  *
  * This transforms strict, spec-derived schemas into permissive ones whose `.safeParse` cannot
  * fail on the specific defects production responses are known to carry: unknown keys, missing
- * nullability, and an enum member the spec hasn't documented yet. `detectUnknownProperties` then
+ * nullability, and an enum member the spec hasn't documented yet. `cleanAndDiagnoseResponse` then
  * walks the *original* (unwrapped) schema in parallel to clean the result and report what was
  * tolerated.
  *
@@ -104,9 +171,9 @@ function addCatchallRecursive(schema: z.ZodType): z.ZodType {
   const def = getDef(schema);
   let result: z.ZodType;
 
-  switch (def.type as string) {
+  switch (def.type) {
     case "object": {
-      const shape = (schema as any).shape as Record<string, z.ZodType>;
+      const shape = objectShape(schema);
       const newShape: Record<string, z.ZodType> = {};
       for (const key of Object.keys(shape)) {
         newShape[key] = toLenientField(addCatchallRecursive(shape[key]!));
@@ -116,13 +183,13 @@ function addCatchallRecursive(schema: z.ZodType): z.ZodType {
     }
 
     case "array": {
-      const innerType = def.element as z.ZodType;
-      result = z.array(addCatchallRecursive(innerType));
+      const { element } = nodeChildren(def);
+      result = z.array(addCatchallRecursive(element!));
       break;
     }
 
     case "union": {
-      const options = def.options as z.ZodType[];
+      const { options = [] } = nodeChildren(def);
       const newOptions = options.map((opt) => addCatchallRecursive(opt));
       if (newOptions.length < 2) {
         result = newOptions[0] ?? schema;
@@ -133,37 +200,34 @@ function addCatchallRecursive(schema: z.ZodType): z.ZodType {
     }
 
     case "optional": {
-      const innerType = def.innerType as z.ZodType;
-      result = addCatchallRecursive(innerType).optional();
+      const { innerType } = nodeChildren(def);
+      result = addCatchallRecursive(innerType!).optional();
       break;
     }
 
     case "nullable": {
-      const innerType = def.innerType as z.ZodType;
-      result = addCatchallRecursive(innerType).nullable();
+      const { innerType } = nodeChildren(def);
+      result = addCatchallRecursive(innerType!).nullable();
       break;
     }
 
     case "record": {
-      const { keyType } = def;
-      const valueType = def.valueType as z.ZodType;
-      result = z.record(keyType as any, addCatchallRecursive(valueType));
+      const { keyType, valueType } = nodeChildren(def);
+      result = z.record(keyType as any, addCatchallRecursive(valueType!));
       break;
     }
 
     case "pipe": {
-      const inSchema = def.in as z.ZodType;
-      const outSchema = def.out as z.ZodType;
-      result = addCatchallRecursive(inSchema).pipe(
-        addCatchallRecursive(outSchema),
+      const { pipeIn, pipeOut } = nodeChildren(def);
+      result = addCatchallRecursive(pipeIn!).pipe(
+        addCatchallRecursive(pipeOut!),
       );
       break;
     }
 
     case "default": {
-      const innerType = def.innerType as z.ZodType;
-      const { defaultValue } = def;
-      result = addCatchallRecursive(innerType).default(defaultValue);
+      const { innerType, defaultValue } = nodeChildren(def);
+      result = addCatchallRecursive(innerType!).default(defaultValue);
       break;
     }
 
@@ -172,13 +236,12 @@ function addCatchallRecursive(schema: z.ZodType): z.ZodType {
       // — Datto adding a new device class, alert priority, etc. before this client's spec is
       // refreshed — parses instead of failing the whole item (which, combined with R7's
       // per-item drop, would silently discard the record: the exact `rmmnetworkdevice`
-      // regression the design exists to prevent). `detectUnknownProperties` below consults the
+      // regression the design exists to prevent). `cleanAndDiagnoseResponse` below consults the
       // *original* (un-widened) entries to detect and report when this actually happens.
-      const entries = (def.entries ?? {}) as Record<string, string>;
-      const values = Object.values(entries);
+      const { enumValues = [] } = nodeChildren(def);
       result =
-        values.length > 0
-          ? z.enum(values as [string, ...string[]]).or(z.string())
+        enumValues.length > 0
+          ? z.enum(enumValues as [string, ...string[]]).or(z.string())
           : schema;
       break;
     }
@@ -200,10 +263,26 @@ function addCatchallRecursive(schema: z.ZodType): z.ZodType {
       break;
     }
 
-    default: {
-      // Defensive: unknown schema type -- return unchanged to avoid crashes
+    // A `.transform()` step, typically the `in` side of a `.pipe()` (e.g. a hand-written
+    // coercion override composing `z.string().transform(JSON.parse).pipe(...)`). Its own
+    // transform function isn't independently walkable, and the schema this module actually
+    // needs to clean/widen is the pipe's `out` side, not this node -- treated as opaque and
+    // returned unchanged, like the terminals above.
+    case "transform": {
       result = schema;
       break;
+    }
+
+    default: {
+      // An unrecognized `_zod.def` node kind reaching here means a Zod-internal shape drift or a
+      // newly-generated schema shape this module has never seen — silently returning it
+      // unchanged would disable catchall-stripping, nullability leniency, and enum widening for
+      // that entire subtree with zero signal. Fail loudly instead so it surfaces in whatever
+      // test (or, worst case, request) first exercises it, rather than quietly degrading R5/R7
+      // coverage in production.
+      throw new Error(
+        `schema-leniency: unrecognized zod schema node type "${def.type}" -- add a case for it to addCatchallRecursive`,
+      );
     }
   }
 
@@ -212,13 +291,14 @@ function addCatchallRecursive(schema: z.ZodType): z.ZodType {
 }
 
 // ---------------------------------------------------------------------------
-// detectUnknownProperties
+// cleanAndDiagnoseResponse
 // ---------------------------------------------------------------------------
 
 /**
  * Walks parsed output and the *original* (non-wrapped) schema in parallel, cleaning the result
  * and recording diagnostics into `diagnostics` (flushed once, summarized, by `parseLenient`
- * itself — see its doc).
+ * itself — see its doc). Returns a cleaned copy of the parsed data with unknown properties
+ * removed.
  *
  * For objects, compares keys against `schema.shape` to identify and strip unknowns. For an
  * `enum`-typed leaf, checks the parsed string against the *original* schema's declared members
@@ -237,37 +317,42 @@ function addCatchallRecursive(schema: z.ZodType): z.ZodType {
  * original per-occurrence, index-qualified `path` (which that port logs immediately and has no
  * aggregation step to collapse).
  *
- * **`collectionSize` tracks the *nearest enclosing array*, not the top-level response shape.**
- * It starts at `1` (a bare single-object parse) and is set to `parsed.length` whenever the walk
- * enters an array, then threaded unchanged through every other node type. This makes `total` (see
- * `DiagnosticsCollector.record`) correct for Datto's dominant real response shape — an enveloped
- * list, e.g. `{ pageDetails: {...}, devices: [...848 items] }` — where the array being walked is
- * nested inside an object, not the top-level value: a diagnostic recorded on `devices[i].deviceClass`
- * reports `total: 848` (the `devices` array's length), not `1` (the envelope object's "length").
- *
- * Returns a cleaned copy of the parsed data with unknown properties removed.
+ * **`collectionKey` identifies the nearest enclosing array's own structural path**, not a
+ * snapshotted size. It is `undefined` until the walk first enters an array, at which point it
+ * becomes that array's own `path` — the same string every element of that array shares (since,
+ * per the point above, elements carry no index of their own) — and is threaded unchanged through
+ * every other node type until a nested array replaces it with *its* path. `DiagnosticsCollector`
+ * resolves each occurrence's `total` from this key lazily, at `flush()` time via `trackExamined`
+ * (see `parseLenient`'s call into the `array` case below), by which point every element of every
+ * array sharing that key — including every outer iteration that repeats a nested array, e.g.
+ * `alerts[i].responseActions` for every `i` — has been visited and its length accumulated. This
+ * is what makes `total` correct even for a diagnostic recorded beneath *two* enclosing arrays
+ * (e.g. `alerts.responseActions.actionType`): each alert's `responseActions` visit adds that
+ * alert's own count into the running total for the `alerts.responseActions` key, so the final
+ * total is the number of `responseActions` objects examined across the whole page, not just the
+ * length of whichever alert's array happened to be walked last. `undefined` denotes "no
+ * enclosing array at all" (a bare single-object parse), which resolves to a total of `1`.
  */
-function detectUnknownProperties(
+function cleanAndDiagnoseResponse(
   parsed: unknown,
   schema: z.ZodType,
   path: string,
   diagnostics: DiagnosticsCollector,
-  collectionSize: number,
+  collectionKey: string | undefined,
 ): unknown {
   if (parsed === null || parsed === undefined) {
     return parsed;
   }
 
   const def = getDef(schema);
-  const defType = def.type as string;
 
-  switch (defType) {
+  switch (def.type) {
     case "object": {
       if (typeof parsed !== "object" || Array.isArray(parsed)) {
         return parsed;
       }
 
-      const shape = (schema as any).shape as Record<string, z.ZodType>;
+      const shape = objectShape(schema);
       const shapeKeys = new Set(Object.keys(shape));
       const parsedRecord = parsed as Record<string, unknown>;
       const parsedKeys = Object.keys(parsedRecord);
@@ -275,12 +360,12 @@ function detectUnknownProperties(
 
       for (const key of parsedKeys) {
         if (shapeKeys.has(key)) {
-          cleaned[key] = detectUnknownProperties(
+          cleaned[key] = cleanAndDiagnoseResponse(
             parsedRecord[key],
             shape[key]!,
             path ? `${path}.${key}` : key,
             diagnostics,
-            collectionSize,
+            collectionKey,
           );
         } else {
           // Deliberately no `value` here (dedup by field only): a stripped key's own value is
@@ -291,7 +376,7 @@ function detectUnknownProperties(
             "stripped unknown response property",
             path ? `${path}.${key}` : key,
             undefined,
-            collectionSize,
+            collectionKey,
           );
         }
       }
@@ -304,33 +389,27 @@ function detectUnknownProperties(
         return parsed;
       }
 
-      const elementSchema = def.element as z.ZodType;
-      const arraySize = parsed.length;
+      const { element } = nodeChildren(def);
+      diagnostics.trackExamined(path, parsed.length);
       return parsed.map((item) =>
-        detectUnknownProperties(
-          item,
-          elementSchema,
-          path,
-          diagnostics,
-          arraySize,
-        ),
+        cleanAndDiagnoseResponse(item, element!, path, diagnostics, path),
       );
     }
 
     case "optional":
     case "nullable": {
-      const innerType = def.innerType as z.ZodType;
-      return detectUnknownProperties(
+      const { innerType } = nodeChildren(def);
+      return cleanAndDiagnoseResponse(
         parsed,
-        innerType,
+        innerType!,
         path,
         diagnostics,
-        collectionSize,
+        collectionKey,
       );
     }
 
     case "union": {
-      const options = def.options as z.ZodType[];
+      const { options = [] } = nodeChildren(def);
 
       if (Array.isArray(parsed)) {
         // Match against array-typed union options
@@ -338,12 +417,12 @@ function detectUnknownProperties(
           (opt: z.ZodType) => getDef(opt).type === "array",
         );
         if (arrayOption) {
-          return detectUnknownProperties(
+          return cleanAndDiagnoseResponse(
             parsed,
             arrayOption,
             path,
             diagnostics,
-            collectionSize,
+            collectionKey,
           );
         }
         return parsed;
@@ -360,24 +439,22 @@ function detectUnknownProperties(
           .filter((opt: z.ZodType) => getDef(opt).type === "object")
           .sort(
             (a: z.ZodType, b: z.ZodType) =>
-              Object.keys((b as any).shape).length -
-              Object.keys((a as any).shape).length,
+              Object.keys(objectShape(b)).length -
+              Object.keys(objectShape(a)).length,
           );
 
         for (const option of objectOptions) {
-          const optionKeys = Object.keys(
-            (option as any).shape as Record<string, z.ZodType>,
-          );
+          const optionKeys = Object.keys(objectShape(option));
           const allKnownPresent = optionKeys.every((k: string) =>
             parsedKeys.has(k),
           );
           if (allKnownPresent) {
-            return detectUnknownProperties(
+            return cleanAndDiagnoseResponse(
               parsed,
               option,
               path,
               diagnostics,
-              collectionSize,
+              collectionKey,
             );
           }
         }
@@ -388,12 +465,12 @@ function detectUnknownProperties(
           (opt: z.ZodType) => getDef(opt).type === "record",
         );
         if (recordOption) {
-          return detectUnknownProperties(
+          return cleanAndDiagnoseResponse(
             parsed,
             recordOption,
             path,
             diagnostics,
-            collectionSize,
+            collectionKey,
           );
         }
       }
@@ -407,8 +484,8 @@ function detectUnknownProperties(
         return parsed;
       }
 
-      const valueType = def.valueType as z.ZodType;
-      const valueDefType = getDef(valueType).type as string;
+      const { valueType } = nodeChildren(def);
+      const valueDefType = getDef(valueType!).type;
 
       // If the value type is a terminal (e.g., z.unknown()), skip recursion
       if (valueDefType === "unknown" || valueDefType === "any") {
@@ -418,12 +495,12 @@ function detectUnknownProperties(
       const parsedRecord = parsed as Record<string, unknown>;
       const cleaned: Record<string, unknown> = {};
       for (const key of Object.keys(parsedRecord)) {
-        cleaned[key] = detectUnknownProperties(
+        cleaned[key] = cleanAndDiagnoseResponse(
           parsedRecord[key],
-          valueType,
+          valueType!,
           path ? `${path}.${key}` : key,
           diagnostics,
-          collectionSize,
+          collectionKey,
         );
       }
       return cleaned;
@@ -432,25 +509,25 @@ function detectUnknownProperties(
     case "pipe": {
       // Recurse using the output schema since parsed data has been
       // transformed through the pipe
-      const outSchema = def.out as z.ZodType;
-      return detectUnknownProperties(
+      const { pipeOut } = nodeChildren(def);
+      return cleanAndDiagnoseResponse(
         parsed,
-        outSchema,
+        pipeOut!,
         path,
         diagnostics,
-        collectionSize,
+        collectionKey,
       );
     }
 
     case "default": {
       // Unwrap to inner type, same as optional/nullable
-      const innerType = def.innerType as z.ZodType;
-      return detectUnknownProperties(
+      const { innerType } = nodeChildren(def);
+      return cleanAndDiagnoseResponse(
         parsed,
-        innerType,
+        innerType!,
         path,
         diagnostics,
-        collectionSize,
+        collectionKey,
       );
     }
 
@@ -460,14 +537,14 @@ function detectUnknownProperties(
       // only detects and records when it fell outside the *original* schema's declared set, it
       // never rejects or rewrites the value.
       if (typeof parsed === "string") {
-        const entries = (def.entries ?? {}) as Record<string, string>;
-        const allowed = new Set(Object.values(entries));
+        const { enumValues = [] } = nodeChildren(def);
+        const allowed = new Set(enumValues);
         if (!allowed.has(parsed)) {
           diagnostics.record(
             "widened response enum",
             path,
             parsed,
-            collectionSize,
+            collectionKey,
           );
         }
       }
@@ -475,8 +552,27 @@ function detectUnknownProperties(
     }
 
     // Terminal types: string, number, boolean, literal, null, unknown, etc.
-    default: {
+    case "string":
+    case "number":
+    case "boolean":
+    case "literal":
+    case "null":
+    case "unknown":
+    case "undefined":
+    case "date":
+    case "never":
+    case "void":
+    case "any":
+    case "bigint": {
       return parsed;
+    }
+
+    default: {
+      // See addCatchallRecursive's identical default case: an unrecognized node kind here means
+      // this pass would silently skip cleaning/diagnosing that entire subtree. Fail loudly.
+      throw new Error(
+        `schema-leniency: unrecognized zod schema node type "${def.type}" -- add a case for it to cleanAndDiagnoseResponse`,
+      );
     }
   }
 }
@@ -491,72 +587,104 @@ function detectUnknownProperties(
  * Returns the dotted path of every `enum`-typed node in `schema`, at every nesting depth (e.g.
  * `['deviceClass', 'antivirus.antivirusStatus', 'patchManagement.patchStatus']`).
  *
- * Reuses the same schema-tree walk as `addCatchallRecursive`/`detectUnknownProperties` (object
- * keys, array elements, union options, optional/nullable/record/pipe/default unwrapping), but
- * over the *original* schema rather than data — so, like `detectUnknownProperties`, an array
- * element contributes no path segment of its own (a schema has no index to contribute). Confines
- * this additional `_zod.def` introspection to this one file (per the module doc's isolation
- * rule) rather than adding a second parallel site in Phase 9's completeness-guard test code,
- * which imports this helper directly.
+ * Reuses the same schema-tree navigation as `addCatchallRecursive`/`cleanAndDiagnoseResponse`
+ * (object keys via `objectShape`, and array/union/optional/nullable/record/pipe/default children
+ * via `nodeChildren`), but over the *original* schema rather than data — so, like
+ * `cleanAndDiagnoseResponse`, an array element contributes no path segment of its own (a schema
+ * has no index to contribute). Confines this additional `_zod.def` introspection to this one
+ * file (per the module doc's isolation rule) rather than adding a second parallel site in
+ * Phase 9's completeness-guard test code, which imports this helper directly.
+ *
+ * Does not guard against a cyclic schema (an object reachable from itself): Datto's generated
+ * schemas are not recursive (verified: no self-referential `z.lazy()`/circular `$ref` anywhere
+ * under `src/generated/schemas/**`), and `addCatchallRecursive`/`cleanAndDiagnoseResponse` rely on
+ * that same invariant with no cycle guard of their own — `addCatchallRecursive`'s cache is
+ * populated only after a node's recursion returns, so a genuine cycle would stack-overflow there
+ * regardless of any guard here. Recording the invariant once, in this one comment, rather than
+ * defending against it three times inconsistently.
  */
 export function enumFieldPaths(schema: z.ZodType): string[] {
   const paths = new Set<string>();
-  walk(schema, "", new Set<z.ZodType>());
+  walk(schema, "");
   return [...paths].sort();
 
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  function walk(node: z.ZodType, path: string, visiting: Set<z.ZodType>): void {
-    if (visiting.has(node)) return; // cycle guard (defensive; Datto's schemas are not recursive)
-    visiting.add(node);
-    try {
-      const def = getDef(node);
-      switch (def.type as string) {
-        case "object": {
-          const shape = (node as any).shape as Record<string, z.ZodType>;
-          for (const key of Object.keys(shape)) {
-            walk(shape[key]!, path ? `${path}.${key}` : key, visiting);
-          }
-          break;
+  function walk(node: z.ZodType, path: string): void {
+    const def = getDef(node);
+    switch (def.type) {
+      case "object": {
+        const shape = objectShape(node);
+        for (const key of Object.keys(shape)) {
+          walk(shape[key]!, path ? `${path}.${key}` : key);
         }
-        case "array": {
-          walk(def.element as z.ZodType, path, visiting);
-          break;
-        }
-        case "union": {
-          for (const opt of def.options as z.ZodType[])
-            walk(opt, path, visiting);
-          break;
-        }
-        case "optional":
-        case "nullable": {
-          walk(def.innerType as z.ZodType, path, visiting);
-          break;
-        }
-        case "record": {
-          walk(def.valueType as z.ZodType, path, visiting);
-          break;
-        }
-        case "pipe": {
-          walk(def.out as z.ZodType, path, visiting);
-          break;
-        }
-        case "default": {
-          walk(def.innerType as z.ZodType, path, visiting);
-          break;
-        }
-        case "enum": {
-          if (path) paths.add(path);
-          break;
-        }
-        default:
-          break;
+        break;
       }
-    } finally {
-      visiting.delete(node);
+      case "array": {
+        const { element } = nodeChildren(def);
+        walk(element!, path);
+        break;
+      }
+      case "union": {
+        const { options = [] } = nodeChildren(def);
+        for (const opt of options) walk(opt, path);
+        break;
+      }
+      case "optional":
+      case "nullable": {
+        const { innerType } = nodeChildren(def);
+        walk(innerType!, path);
+        break;
+      }
+      case "record": {
+        const { valueType } = nodeChildren(def);
+        walk(valueType!, path);
+        break;
+      }
+      case "pipe": {
+        const { pipeOut } = nodeChildren(def);
+        walk(pipeOut!, path);
+        break;
+      }
+      case "default": {
+        const { innerType } = nodeChildren(def);
+        walk(innerType!, path);
+        break;
+      }
+      case "enum": {
+        if (path) paths.add(path);
+        break;
+      }
+      default:
+        break;
     }
   }
-  /* eslint-enable @typescript-eslint/no-explicit-any */
 }
+
+// ---------------------------------------------------------------------------
+// Lenient<T> — the shape parseLenient actually returns on success
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps a response type `T` to the shape `parseLenient` actually returns on success: every object
+ * field — named or nested, at any depth — additionally accepts `null` on top of whatever
+ * optionality it already declared, mirroring `toLenientField`'s runtime leniency exactly (every
+ * named field independently tolerates `null`/absent regardless of what the generated type
+ * claims). Array elements are mapped through unchanged and are not themselves independently
+ * nullable (only named object fields are — `addCatchallRecursive`'s `array` case does not wrap
+ * its element schema in `toLenientField`), and primitives pass through as-is.
+ *
+ * A record's dynamic (index-signature) values are structurally indistinguishable from a named
+ * object's own fields once `T` erases to plain TypeScript types, so this conservatively treats
+ * them the same (nullable) even though `addCatchallRecursive`'s `record` case does not actually
+ * wrap dynamic values in `toLenientField`. That mismatch only ever *widens* the static type (an
+ * extra `null` branch a caller may need to narrow away that can never actually occur) — it can
+ * never *narrow* it the way returning the bare, unmapped `T` did, which is precisely the defect
+ * this type exists to fix.
+ */
+export type Lenient<T> = T extends readonly (infer U)[]
+  ? Lenient<U>[]
+  : T extends object
+    ? { [K in keyof T]: Lenient<T[K]> | null }
+    : T;
 
 // ---------------------------------------------------------------------------
 // parseLenient (public API)
@@ -568,7 +696,7 @@ export function enumFieldPaths(schema: z.ZodType): string[] {
  * field tolerates `null`/absent), and an undocumented enum member (widened to passthrough) — R5,
  * R7. Every tolerated occurrence is aggregated and reported as one summarized `debug` line per
  * `(field, value?)` via `DiagnosticsCollector`, not logged per occurrence (see
- * `detectUnknownProperties`'s doc for why array element paths drop their index to make this
+ * `cleanAndDiagnoseResponse`'s doc for why array element paths drop their index to make this
  * aggregation actually collapse, and for how each diagnostic's `total` tracks the collection it
  * was actually found in).
  *
@@ -587,6 +715,11 @@ export function enumFieldPaths(schema: z.ZodType): string[] {
  * null/absent + open enums during parsing, then runs a detection pass to clean and diagnose,
  * returning a clean result.
  *
+ * The overload below reflects this gate in the return type itself, not just prose: passing a
+ * `logger` returns `Lenient<T>` (every field additionally typed to admit `null`, matching what
+ * null/presence leniency can actually hand back), while omitting it returns the untouched `T`
+ * (accurate, since the strict-`safeParse` fallback applies none of that leniency).
+ *
  * @param schema - The Zod schema to validate against
  * @param data - The raw data to parse
  * @param logger - Logger with a `debug` method for reporting leniency diagnostics. Optional only
@@ -597,9 +730,21 @@ export function enumFieldPaths(schema: z.ZodType): string[] {
 export function parseLenient<T>(
   schema: z.ZodType<T>,
   data: unknown,
+  logger: LenientParseLogger,
+  context?: string,
+): z.ZodSafeParseResult<Lenient<T>>;
+// eslint-disable-next-line no-redeclare -- TS overload signature, not a duplicate declaration
+export function parseLenient<T>(
+  schema: z.ZodType<T>,
+  data: unknown,
+): z.ZodSafeParseResult<T>;
+// eslint-disable-next-line no-redeclare -- implementation signature for the overloads above
+export function parseLenient<T>(
+  schema: z.ZodType<T>,
+  data: unknown,
   logger?: LenientParseLogger,
   context?: string,
-): z.ZodSafeParseResult<T> {
+): z.ZodSafeParseResult<T> | z.ZodSafeParseResult<Lenient<T>> {
   if (!logger) {
     return schema.safeParse(data);
   }
@@ -608,16 +753,16 @@ export function parseLenient<T>(
   const result = wrapped.safeParse(data);
 
   if (!result.success) {
-    return result as z.ZodSafeParseResult<T>;
+    return result as z.ZodSafeParseResult<Lenient<T>>;
   }
 
   const diagnostics = new DiagnosticsCollector();
-  const cleaned = detectUnknownProperties(
+  const cleaned = cleanAndDiagnoseResponse(
     result.data,
     schema,
     "",
     diagnostics,
-    1,
+    undefined,
   );
 
   diagnostics.flush(
@@ -625,5 +770,5 @@ export function parseLenient<T>(
     context ?? "(unknown)",
   );
 
-  return { success: true, data: cleaned as T };
+  return { success: true, data: cleaned as Lenient<T> };
 }

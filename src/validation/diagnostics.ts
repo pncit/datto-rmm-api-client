@@ -9,8 +9,8 @@
  * `DiagnosticsCollector` instead accumulates one group per distinct `(message, field, value?)`
  * recorded during a single `parseLenient` call and emits exactly one summarized line per group
  * when `flush()` runs at the end of that call, each carrying how many occurrences were folded
- * into it (`count`) and the size of the collection each occurrence was recorded against
- * (`total` — see `record`).
+ * into it (`count`) and the number of items actually examined at that field's structural
+ * position (`total` — see `record`/`trackExamined`).
  *
  * Scoped to the two benign events `schema-leniency.ts` produces in this phase at `debug`
  * (unknown-key strip, enum widening). `flush` takes a plain `(message, meta?) => void` sink
@@ -31,20 +31,48 @@ interface DiagnosticGroup {
   readonly field: string;
   readonly value: string | undefined;
   count: number;
-  total: number;
+  /**
+   * Identifies which `trackExamined` accumulation this group's `total` resolves from at
+   * `flush()` time (see `record`). `undefined` means the occurrence was found outside any array
+   * (a bare single-object parse), which resolves to a total of `1`.
+   */
+  readonly collectionKey: string | undefined;
 }
 
-/** Builds the dedup key for a `(message, field, value)` triple. `value` is optional: see `record`. */
+/**
+ * Builds the dedup key for a `(message, field, value)` triple. Uses `JSON.stringify` on the
+ * tuple rather than plain-text concatenation: `field` and `value` can both be arbitrary
+ * wire-derived strings (a stripped record key, a widened enum value) that are not guaranteed to
+ * exclude any particular delimiter, so a text join risks two distinct triples colliding onto the
+ * same key. `JSON.stringify` escapes each component, so no component's own content can produce a
+ * false collision with another's.
+ */
 function groupKey(
   message: string,
   field: string,
   value: string | undefined,
 ): string {
-  return `${message} ${field} ${value ?? ""}`;
+  return JSON.stringify([message, field, value ?? null]);
 }
 
 export class DiagnosticsCollector {
   private readonly groups = new Map<string, DiagnosticGroup>();
+  private readonly examined = new Map<string, number>();
+
+  /**
+   * Records that `size` items were visited at the structural array position identified by
+   * `collectionKey` (the array's own field path — see `cleanAndDiagnoseResponse`'s doc).
+   * Accumulates (adds) rather than overwrites: a nested array is revisited once per element of
+   * whichever array encloses it (e.g. `alerts[i].responseActions` once per alert), and each of
+   * those visits contributes its own length toward the true total number of items examined at
+   * that position across the whole call — not just the length of whichever visit happened last.
+   */
+  trackExamined(collectionKey: string, size: number): void {
+    this.examined.set(
+      collectionKey,
+      (this.examined.get(collectionKey) ?? 0) + size,
+    );
+  }
 
   /**
    * Records one occurrence of a diagnostic event, folding it into the existing group for the
@@ -58,21 +86,25 @@ export class DiagnosticsCollector {
    * (and leak the value into a diagnostic line for no benefit) if it participated in the dedup
    * key.
    *
-   * `total` is the size of the collection this occurrence was found in — the length of the
-   * nearest enclosing array the caller is walking (`1` for a single-object parse, the default).
-   * A group's `total` is the largest value recorded for it; every occurrence within one
-   * `parseLenient` call is expected to report the same collection size, so this is defensive
-   * rather than load-bearing.
+   * `collectionKey` identifies which array position's accumulated `trackExamined` count this
+   * group's `total` is resolved from once `flush()` runs — by which point every element of every
+   * array sharing that key has been visited, so the resolved total is exact even when the same
+   * key is revisited many times (a nested array, once per outer element). Omit it (leave
+   * `undefined`) for an occurrence found outside any array, which resolves to a total of `1`.
    */
-  record(message: string, field: string, value?: string, total = 1): void {
+  record(
+    message: string,
+    field: string,
+    value?: string,
+    collectionKey?: string,
+  ): void {
     const key = groupKey(message, field, value);
     const existing = this.groups.get(key);
     if (existing) {
       existing.count += 1;
-      existing.total = Math.max(existing.total, total);
       return;
     }
-    this.groups.set(key, { message, field, value, count: 1, total });
+    this.groups.set(key, { message, field, value, count: 1, collectionKey });
   }
 
   /** `true` if nothing has been recorded since construction (or the last `flush()`). */
@@ -85,11 +117,12 @@ export class DiagnosticsCollector {
    * `flush()`) via `sink`, then clears the collector.
    *
    * `context` identifies the call site (e.g. `'GET /device'`), threaded through unchanged as
-   * `meta.context`. Each group's own `total` (see `record`) — the size of the collection that
-   * occurrence was recorded against — flows through unchanged, so a flushed line reads as e.g.
-   * `{ field: 'deviceClass', value: 'rmmnetworkdevice', count: 3, total: 848 }` for an item
-   * widened inside an 848-element `devices` array, regardless of whether that array is the
-   * top-level response or nested inside an envelope object (e.g. `{ pageDetails, devices }`).
+   * `meta.context`. Each group's `total` is resolved here, at the end of the whole walk, from its
+   * `collectionKey`'s accumulated `trackExamined` count (or `1` if it has none) — so a flushed
+   * line reads as e.g. `{ field: 'deviceClass', value: 'rmmnetworkdevice', count: 3, total: 848 }`
+   * for an item widened inside an 848-element `devices` array, regardless of whether that array
+   * is the top-level response, nested inside an envelope object (e.g. `{ pageDetails, devices }`),
+   * or itself nested inside another array.
    *
    * Every wire-derived value here rides in `meta`, never the message string, per the R20
    * masking-boundary invariant (`src/logging/mask.ts` only scrubs `meta`): the message is always
@@ -97,11 +130,15 @@ export class DiagnosticsCollector {
    */
   flush(sink: DiagnosticsSink, context: string): void {
     for (const group of this.groups.values()) {
+      const total =
+        group.collectionKey !== undefined
+          ? (this.examined.get(group.collectionKey) ?? 1)
+          : 1;
       const meta: Record<string, unknown> = {
         context,
         field: group.field,
         count: group.count,
-        total: group.total,
+        total,
       };
       if (group.value !== undefined) {
         meta.value = group.value;
@@ -109,5 +146,6 @@ export class DiagnosticsCollector {
       sink(group.message, meta);
     }
     this.groups.clear();
+    this.examined.clear();
   }
 }
