@@ -31,6 +31,7 @@ import {
 import type { Device } from "../../schema-overrides";
 
 import { BaseResource } from "./base-resource";
+import { filterSchema } from "./filter-schema";
 import { narrow } from "./narrow";
 import { variableSchema } from "./variable-schema";
 import { voidResponseSchema } from "./void-response";
@@ -72,30 +73,6 @@ export const deviceNetworkInterfaceSchema = z.object({
       }),
     )
     .optional(),
-});
-
-/** `GET /api/v2/site/{siteUid}/filters`'s item schema (`Filter`). Scoped to this resource file —
- * distinct from Phase 8's `FilterResource`, which covers the unrelated account-wide
- * `/api/v2/filter/default-filters` and `/api/v2/filter/custom-filters` (design "singular for
- * ... audit" naming rule footnote; `getSiteDeviceFilters` is a *site*-scoped read, not one of
- * those two account-wide filter catalogs). `type` is a real spec enum (`FilterType`); no override
- * is needed for it to widen at runtime — `parseLenient`'s enum degradation (Phase 4) applies to
- * every enum node this client validates, independent of whether the entity is otherwise
- * reconciled in `schema-overrides/`.
- *
- * Exported only so `tests/generated/schema-mirror-pin.ts` can pin it against `Filter` — not
- * resource API; see {@link deviceNetworkInterfaceSchema}'s doc for the barrel-leak constraint
- * this must honor.
- *
- * @internal
- */
-export const filterSchema = z.object({
-  id: z.number().optional(),
-  name: z.string().optional(),
-  description: z.string().optional(),
-  type: z.enum(["rmm_default", "custom", "site"]).optional(),
-  dateCreate: z.iso.datetime().optional(),
-  lastUpdated: z.iso.datetime().optional(),
 });
 
 /**

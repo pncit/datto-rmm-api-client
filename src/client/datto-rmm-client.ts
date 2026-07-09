@@ -10,24 +10,23 @@ import {
   type DattoRmmClientConfig,
 } from "./datto-client-config";
 import { AccountResource } from "./resources/account-resource";
+import { ActivityLogResource } from "./resources/activity-log-resource";
 import { AlertResource } from "./resources/alert-resource";
+import { AuditResource } from "./resources/audit-resource";
 import { DeviceResource } from "./resources/device-resource";
+import { FilterResource } from "./resources/filter-resource";
 import { JobResource } from "./resources/job-resource";
 import { SiteResource } from "./resources/site-resource";
+import { SystemResource } from "./resources/system-resource";
+import { UserResource } from "./resources/user-resource";
 
 /**
  * `DattoRmmClient` (R1, R2, R9, R10–R14, design "Public surface" / Overview): constructs and
  * wires every layer below the resource namespaces — config validation, the UDF-masking logger
  * boundary (R20), the dual-layer rate limiter (R11), the shared interceptor-bearing axios
- * instance (R12), and the throwing OAuth2 `AuthManager` (R10) — then mounts the resource
- * namespaces on top.
- *
- * **Phase 7 scope (this class):** mounts the five namespaces this phase implements — `account`,
- * `sites`, `devices`, `alerts`, `jobs`. Phase 8 adds the remaining five (`audit`, `filters`,
- * `users`, `activityLogs`, `system`) and the public `createDattoRmmClient(config)` factory (plan
- * Phase 8 Step 6) — this class is not yet exported from `src/index.ts` (the old barrel stays
- * active per the plan's coexistence rule; plan Phase 7 Step 6: "Do not touch `src/index.ts`
- * yet").
+ * instance (R12), and the throwing OAuth2 `AuthManager` (R10) — then mounts all ten resource
+ * namespaces on top, covering every one of the 53 paths / 57 operations in the committed spec
+ * (R1, verified mechanically by `tests/unit/client/coverage-map.test.ts`).
  *
  * **Construction order matters:** the shared axios instance is built via `createHttpClient`
  * (Phase 5) with no authentication wired in (by design — see that module's doc); `AuthManager`
@@ -44,6 +43,11 @@ export class DattoRmmClient {
   readonly devices: DeviceResource;
   readonly alerts: AlertResource;
   readonly jobs: JobResource;
+  readonly audit: AuditResource;
+  readonly filters: FilterResource;
+  readonly users: UserResource;
+  readonly activityLogs: ActivityLogResource;
+  readonly system: SystemResource;
 
   constructor(config: DattoRmmClientConfig) {
     const parsed = dattoRmmClientConfigSchema.safeParse(config);
@@ -86,5 +90,24 @@ export class DattoRmmClient {
     this.devices = new DeviceResource(axiosInstance, logger);
     this.alerts = new AlertResource(axiosInstance, logger);
     this.jobs = new JobResource(axiosInstance, logger);
+    this.audit = new AuditResource(axiosInstance, logger);
+    this.filters = new FilterResource(axiosInstance, logger);
+    this.users = new UserResource(axiosInstance, logger);
+    this.activityLogs = new ActivityLogResource(axiosInstance, logger);
+    this.system = new SystemResource(axiosInstance, logger);
   }
+}
+
+/**
+ * Constructs a {@link DattoRmmClient} (R1, R2, design "Public surface"). The sole entry point
+ * `src/index.ts` exports for creating a client — a thin, named factory over `new
+ * DattoRmmClient(config)` so consumers never need the `new` keyword, matching `fuze-api`'s own
+ * `createFuzeClient` convention (design Decision 1: converge on `fuze-api`'s architecture).
+ *
+ * @throws {DattoValidationError} If `config` fails validation (see the constructor).
+ */
+export function createDattoRmmClient(
+  config: DattoRmmClientConfig,
+): DattoRmmClient {
+  return new DattoRmmClient(config);
 }

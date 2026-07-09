@@ -43,9 +43,10 @@ const BASIC_AUTH_PASSWORD = "public";
 
 /**
  * OAuth2 password-grant token lifecycle for the Datto RMM v2 API (R10). Ported from the retired
- * `src/auth.ts`'s `AuthManager`, refactored to **throw** instead of returning `Result<T>`
- * (Decision 4), and to drive proactive refresh from `tokenRefreshPct` (remaining-TTL percentage)
- * rather than the old fixed 60s pre-expiry window.
+ * `0.1.x` `AuthManager` (`src/auth.ts`, deleted in Phase 8), refactored to **throw** instead of
+ * returning the old non-throwing result contract (Decision 4), and to drive proactive refresh
+ * from `tokenRefreshPct` (remaining-TTL percentage) rather than the old fixed 60s pre-expiry
+ * window.
  *
  * **Transport isolation (Phase 5 Step 4, critical):** the token round-trip is not a v2 endpoint
  * and must not carry a Bearer header, consume the v2 read rate-limit window, or run through the

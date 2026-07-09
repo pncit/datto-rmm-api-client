@@ -9,7 +9,6 @@
   },
   "include": [
     "src/**/*.test.ts",
-    "src/__tests__/**/*.ts",
     "src/http/axios-augment.d.ts",
     "tests/**/*.ts",
     "scripts/**/*.mjs"

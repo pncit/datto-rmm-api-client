@@ -26,7 +26,7 @@ export default [
   // TypeScript source files (excludes tests, which get a looser config below)
   {
     files: ['src/**/*.ts'],
-    ignores: ['src/**/*.test.ts', 'src/__tests__/**'],
+    ignores: ['src/**/*.test.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
@@ -67,7 +67,7 @@ export default [
 
   // Test files — looser rules
   {
-    files: ['src/**/*.test.ts', 'src/__tests__/**/*.ts'],
+    files: ['src/**/*.test.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {

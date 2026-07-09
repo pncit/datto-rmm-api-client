@@ -2,10 +2,15 @@ import nock from "nock";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { AccountResource } from "@/client/resources/account-resource";
+import { ActivityLogResource } from "@/client/resources/activity-log-resource";
 import { AlertResource } from "@/client/resources/alert-resource";
+import { AuditResource } from "@/client/resources/audit-resource";
 import { DeviceResource } from "@/client/resources/device-resource";
+import { FilterResource } from "@/client/resources/filter-resource";
 import { JobResource } from "@/client/resources/job-resource";
 import { SiteResource } from "@/client/resources/site-resource";
+import { SystemResource } from "@/client/resources/system-resource";
+import { UserResource } from "@/client/resources/user-resource";
 import { DattoRmmClient } from "@/client/datto-rmm-client";
 import type { DattoRmmClientConfig } from "@/client/datto-client-config";
 
@@ -23,7 +28,7 @@ function config(
   };
 }
 
-describe("DattoRmmClient (Phase 7 scaffold — account/sites/devices/alerts/jobs)", () => {
+describe("DattoRmmClient (all ten namespaces finalized)", () => {
   beforeAll(() => {
     nock.disableNetConnect();
   });
@@ -36,7 +41,7 @@ describe("DattoRmmClient (Phase 7 scaffold — account/sites/devices/alerts/jobs
     nock.cleanAll();
   });
 
-  it("mounts account/sites/devices/alerts/jobs as the correct resource classes", () => {
+  it("mounts all ten namespaces as the correct resource classes", () => {
     const client = new DattoRmmClient(config());
 
     expect(client.account).toBeInstanceOf(AccountResource);
@@ -44,6 +49,11 @@ describe("DattoRmmClient (Phase 7 scaffold — account/sites/devices/alerts/jobs
     expect(client.devices).toBeInstanceOf(DeviceResource);
     expect(client.alerts).toBeInstanceOf(AlertResource);
     expect(client.jobs).toBeInstanceOf(JobResource);
+    expect(client.audit).toBeInstanceOf(AuditResource);
+    expect(client.filters).toBeInstanceOf(FilterResource);
+    expect(client.users).toBeInstanceOf(UserResource);
+    expect(client.activityLogs).toBeInstanceOf(ActivityLogResource);
+    expect(client.system).toBeInstanceOf(SystemResource);
   });
 
   it("throws DattoValidationError('request') on an invalid config, before mounting anything", () => {
