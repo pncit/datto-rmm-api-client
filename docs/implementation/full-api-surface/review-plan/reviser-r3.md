@@ -1,9 +1,0 @@
-## reviser — round 3
-
-Addressed both `Open` findings from plan-auditor round 3. The round-1 (7) and round-2 (4) findings
-were already ratified/verified Closed and are carried forward.
-
-| ID | Disposition | Rationale |
-|----|-------------|-----------|
-| plan-auditor-r3-f1 | Fixed | The paginate read path was going out untagged. Phase 6 Step 2 now **requires** `paginate` to attach an explicit `{ kind: 'read' }` `RateDescriptor` on each page's axios config (via the same `rateDescriptor` property the `http*` primitives use), and the example replaces the placeholder comment (`/* RateDescriptor: read */`) with the real attach (`rateDescriptor: { kind: 'read' }`). Phase 5 Step 3 now defines the interceptor's behavior when **no** descriptor is present — it defaults to `{ kind: 'read' }`, so an untagged request is never sent unthrottled and `acquire` is never called with `undefined`. Added a `paginate.test.ts` assertion that the walk consumes the read window once per page (`limiter.acquire` called with `{ kind: 'read' }` per page). R11 now holds on the highest-volume read path. |
-| plan-auditor-r3-f2 | Fixed | Every 403 was hard-labeled `code:'ip-block'`, mislabeling ordinary authorization failures. Narrowed the classification: Phase 3 `DattoApiError` now types `code?: 'ip-block' \| 'forbidden'`; Phase 5 Step 3 + example classify `'ip-block'` **only** when the 403 carries a rate/block indicator (documented `isRateLimitBlock(response)` predicate — `Retry-After` header or a block message in the body), else `'forbidden'`. Both are surfaced without retry (Non-Goal preserved) with the raw `response` body/headers attached so consumers can disambiguate. Updated the Phase 5 http-client test to cover both branches, the Phase 10 README error-handling section to document the `ip-block`/`forbidden` distinction, and the Deferred Validation entry to confirm Datto's real IP-block 403 marker against a live block (the one fact not obtainable offline). |
