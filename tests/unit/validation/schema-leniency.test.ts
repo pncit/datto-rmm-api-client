@@ -961,6 +961,43 @@ describe("parseLenient", () => {
       );
     });
 
+    it("reports total against the enclosing array's length for an enveloped list response, not the top-level object", () => {
+      // Datto's dominant real response shape wraps the named array in a `pageDetails` envelope
+      // (`{ pageDetails: {...}, devices: [...] }`), so the top-level parsed value is an object,
+      // not an array. `total` must still reflect `devices.length`, not `1`.
+      const itemSchema = z.object({
+        deviceClass: z.enum(["device", "printer", "esxihost"]),
+      });
+      const schema = z.object({
+        pageDetails: z.object({ count: z.number(), totalCount: z.number() }),
+        devices: z.array(itemSchema),
+      });
+      const data = {
+        pageDetails: { count: 848, totalCount: 848 },
+        devices: [
+          ...Array.from({ length: 845 }, () => ({ deviceClass: "device" })),
+          ...Array.from({ length: 3 }, () => ({
+            deviceClass: "rmmnetworkdevice",
+          })),
+        ],
+      };
+      const { logger, debugMock } = createMockDebugLogger();
+
+      const result = parseLenient(schema, data, logger, "GET /site/devices");
+
+      expect(result.success).toBe(true);
+      expect(debugMock).toHaveBeenCalledTimes(1);
+      expect(debugMock).toHaveBeenCalledWith(
+        "widened response enum",
+        expect.objectContaining({
+          field: "devices.deviceClass",
+          value: "rmmnetworkdevice",
+          count: 3,
+          total: 848,
+        }),
+      );
+    });
+
     it("reports distinct widened values as separate groups within the same aggregated call", () => {
       const itemSchema = z.object({
         deviceClass: z.enum(["device", "printer", "esxihost"]),

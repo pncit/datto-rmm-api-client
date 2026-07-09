@@ -22,7 +22,10 @@ import { DiagnosticsCollector } from "./diagnostics";
  *   every diagnostic this module produces is benign (`debug`) and routed through a
  *   `DiagnosticsCollector` (`./diagnostics.ts`) that dedupes and summarizes per `parseLenient`
  *   call — see `detectUnknownProperties`'s module doc for why array element paths deliberately
- *   drop their index to make this aggregation actually collapse across a collection.
+ *   drop their index to make this aggregation actually collapse across a collection, and for how
+ *   each diagnostic's `total` tracks the *enclosing* collection it was found in (not just the
+ *   top-level response shape), so an enveloped list response (e.g. `{ pageDetails, devices }`)
+ *   still reports `count`/`total` against `devices.length`, not `1`.
  *
  * All Zod v4 internal access is isolated here. No other module should read `_zod.def` directly.
  */
@@ -60,6 +63,16 @@ function getDef(schema: z.ZodType): any {
  * enormous and perpetually stale; recursive response leniency covers it in one place"). Applied
  * only to named object fields — a record's dynamic values are left to their own declared
  * shape, since "optional" has no clear meaning for an already-dynamic key.
+ *
+ * **Invariant this relies on:** making every named field independently optional also makes a
+ * union branch's own discriminator no longer required by the permissive parse, so a payload
+ * matching no branch's real shape will match the first (now effectively all-optional) branch
+ * instead of failing. This is sound only because no response schema under `src/generated/schemas/**`
+ * declares a `z.union` today (verified by grep; Datto's spec has no `oneOf` response bodies). A
+ * future spec refresh or hand-written override (`src/schema-overrides.ts`, Phase 6) that
+ * introduces a response union would silently mismatch branches instead of failing — Phase 9's
+ * schema-completeness audit should assert `src/generated/schemas/**` stays union-free so this
+ * fails loudly if that ever changes.
  */
 function toLenientField(fieldSchema: z.ZodType): z.ZodType {
   return fieldSchema.nullable().optional();
@@ -224,6 +237,14 @@ function addCatchallRecursive(schema: z.ZodType): z.ZodType {
  * original per-occurrence, index-qualified `path` (which that port logs immediately and has no
  * aggregation step to collapse).
  *
+ * **`collectionSize` tracks the *nearest enclosing array*, not the top-level response shape.**
+ * It starts at `1` (a bare single-object parse) and is set to `parsed.length` whenever the walk
+ * enters an array, then threaded unchanged through every other node type. This makes `total` (see
+ * `DiagnosticsCollector.record`) correct for Datto's dominant real response shape — an enveloped
+ * list, e.g. `{ pageDetails: {...}, devices: [...848 items] }` — where the array being walked is
+ * nested inside an object, not the top-level value: a diagnostic recorded on `devices[i].deviceClass`
+ * reports `total: 848` (the `devices` array's length), not `1` (the envelope object's "length").
+ *
  * Returns a cleaned copy of the parsed data with unknown properties removed.
  */
 function detectUnknownProperties(
@@ -231,6 +252,7 @@ function detectUnknownProperties(
   schema: z.ZodType,
   path: string,
   diagnostics: DiagnosticsCollector,
+  collectionSize: number,
 ): unknown {
   if (parsed === null || parsed === undefined) {
     return parsed;
@@ -258,6 +280,7 @@ function detectUnknownProperties(
             shape[key]!,
             path ? `${path}.${key}` : key,
             diagnostics,
+            collectionSize,
           );
         } else {
           // Deliberately no `value` here (dedup by field only): a stripped key's own value is
@@ -267,6 +290,8 @@ function detectUnknownProperties(
           diagnostics.record(
             "stripped unknown response property",
             path ? `${path}.${key}` : key,
+            undefined,
+            collectionSize,
           );
         }
       }
@@ -280,15 +305,28 @@ function detectUnknownProperties(
       }
 
       const elementSchema = def.element as z.ZodType;
+      const arraySize = parsed.length;
       return parsed.map((item) =>
-        detectUnknownProperties(item, elementSchema, path, diagnostics),
+        detectUnknownProperties(
+          item,
+          elementSchema,
+          path,
+          diagnostics,
+          arraySize,
+        ),
       );
     }
 
     case "optional":
     case "nullable": {
       const innerType = def.innerType as z.ZodType;
-      return detectUnknownProperties(parsed, innerType, path, diagnostics);
+      return detectUnknownProperties(
+        parsed,
+        innerType,
+        path,
+        diagnostics,
+        collectionSize,
+      );
     }
 
     case "union": {
@@ -305,6 +343,7 @@ function detectUnknownProperties(
             arrayOption,
             path,
             diagnostics,
+            collectionSize,
           );
         }
         return parsed;
@@ -333,7 +372,13 @@ function detectUnknownProperties(
             parsedKeys.has(k),
           );
           if (allKnownPresent) {
-            return detectUnknownProperties(parsed, option, path, diagnostics);
+            return detectUnknownProperties(
+              parsed,
+              option,
+              path,
+              diagnostics,
+              collectionSize,
+            );
           }
         }
 
@@ -348,6 +393,7 @@ function detectUnknownProperties(
             recordOption,
             path,
             diagnostics,
+            collectionSize,
           );
         }
       }
@@ -377,6 +423,7 @@ function detectUnknownProperties(
           valueType,
           path ? `${path}.${key}` : key,
           diagnostics,
+          collectionSize,
         );
       }
       return cleaned;
@@ -386,13 +433,25 @@ function detectUnknownProperties(
       // Recurse using the output schema since parsed data has been
       // transformed through the pipe
       const outSchema = def.out as z.ZodType;
-      return detectUnknownProperties(parsed, outSchema, path, diagnostics);
+      return detectUnknownProperties(
+        parsed,
+        outSchema,
+        path,
+        diagnostics,
+        collectionSize,
+      );
     }
 
     case "default": {
       // Unwrap to inner type, same as optional/nullable
       const innerType = def.innerType as z.ZodType;
-      return detectUnknownProperties(parsed, innerType, path, diagnostics);
+      return detectUnknownProperties(
+        parsed,
+        innerType,
+        path,
+        diagnostics,
+        collectionSize,
+      );
     }
 
     case "enum": {
@@ -404,7 +463,12 @@ function detectUnknownProperties(
         const entries = (def.entries ?? {}) as Record<string, string>;
         const allowed = new Set(Object.values(entries));
         if (!allowed.has(parsed)) {
-          diagnostics.record("widened response enum", path, parsed);
+          diagnostics.record(
+            "widened response enum",
+            path,
+            parsed,
+            collectionSize,
+          );
         }
       }
       return parsed;
@@ -505,16 +569,28 @@ export function enumFieldPaths(schema: z.ZodType): string[] {
  * R7. Every tolerated occurrence is aggregated and reported as one summarized `debug` line per
  * `(field, value?)` via `DiagnosticsCollector`, not logged per occurrence (see
  * `detectUnknownProperties`'s doc for why array element paths drop their index to make this
- * aggregation actually collapse).
+ * aggregation actually collapse, and for how each diagnostic's `total` tracks the collection it
+ * was actually found in).
  *
- * When no logger is provided, delegates directly to `schema.safeParse(data)` for zero overhead.
- * When a logger is present, wraps the schema to preserve unknown properties and tolerate
+ * **The `logger` argument gates all three leniency behaviors, not just diagnostics.** When no
+ * logger is provided, this delegates directly to `schema.safeParse(data)` — the original, *strict*
+ * schema — for zero overhead; null tolerance, presence tolerance, and enum degradation are then
+ * **not applied**, so a response carrying an undocumented enum member or an unexpectedly-null
+ * field fails validation exactly as it would without this module. This mirrors fuze-api's own
+ * ported precedent (`schema.safeParse(data)` on the unwrapped schema when `logger` is falsy) and
+ * is safe in practice only because every real call site (`BaseResource`, Phase 6) always
+ * constructs its resources with the client's always-present `DattoLogger` and therefore always
+ * passes one — `parseLenient` itself does not and cannot enforce that; treat `logger` as
+ * effectively required for any response actually reaching production traffic, optional only for
+ * lightweight/no-diagnostics callers (e.g. this module's own "matches safeParse exactly" tests).
+ * When a logger *is* present, this wraps the schema to preserve unknown properties and tolerate
  * null/absent + open enums during parsing, then runs a detection pass to clean and diagnose,
  * returning a clean result.
  *
  * @param schema - The Zod schema to validate against
  * @param data - The raw data to parse
- * @param logger - Optional logger with a `debug` method for reporting leniency diagnostics
+ * @param logger - Logger with a `debug` method for reporting leniency diagnostics. Optional only
+ *   for callers that intentionally want strict, non-degrading `safeParse` behavior — see above.
  * @param context - Optional context string identifying the endpoint/stage (e.g., 'GET /device/{uid}')
  * @returns A Zod ZodSafeParseResult with unknown properties stripped from successful results
  */
@@ -536,10 +612,18 @@ export function parseLenient<T>(
   }
 
   const diagnostics = new DiagnosticsCollector();
-  const cleaned = detectUnknownProperties(result.data, schema, "", diagnostics);
+  const cleaned = detectUnknownProperties(
+    result.data,
+    schema,
+    "",
+    diagnostics,
+    1,
+  );
 
-  const total = Array.isArray(result.data) ? result.data.length : 1;
-  diagnostics.flush(logger, context ?? "(unknown)", total);
+  diagnostics.flush(
+    (message, meta) => logger.debug(message, meta),
+    context ?? "(unknown)",
+  );
 
   return { success: true, data: cleaned as T };
 }
