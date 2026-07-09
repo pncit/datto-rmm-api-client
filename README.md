@@ -276,15 +276,18 @@ try {
     console.error(err.statusCode, err.message, err.response);
 
     if (err.statusCode === 429) {
-      // err.retryAfterMs is populated when the server's own Retry-After exceeded the client's
-      // wait ceiling and it gave up retrying rather than sleeping indefinitely.
+      // err.retryAfterMs is populated when the client gave up rather than retrying further —
+      // either the server's own Retry-After exceeded the client's wait ceiling, or the client
+      // exhausted retry.maxAttempts first.
     }
 
     if (err.statusCode === 403) {
       // Datto returns 403 for BOTH a rate-limit IP-block penalty and an ordinary authorization
       // failure (insufficient scope, revoked credentials) — the status alone doesn't
       // distinguish them. err.code disambiguates: 'ip-block' | 'forbidden'. Neither is retried
-      // automatically; err.response carries the raw body so you can inspect it yourself.
+      // automatically; err.response carries the raw body so you can inspect it yourself. For an
+      // 'ip-block' with a server-supplied Retry-After, err.retryAfterMs also carries the block's
+      // wait hint.
     }
   } else if (err instanceof DattoValidationError) {
     // Schema failure — either an outgoing request (a body you built violates the write schema)
@@ -298,7 +301,8 @@ try {
 
 - **`DattoApiError`** — HTTP/transport failures. `statusCode` (`0` for a transport-level failure
   with no response at all), `response` (the raw response body, if any), `requestId` (from a
-  conventional response header, if present), `retryAfterMs` (429 only), and `code` (403 only:
+  conventional response header, if present), `retryAfterMs` (set on a 429, and also on a 403
+  `ip-block` when the server sends a `Retry-After`), and `code` (403 only:
   `'ip-block' | 'forbidden'`).
 - **`DattoValidationError`** — Zod validation failures. `stage` (`'request' | 'response'`),
   `zodError`, `prettyMessage`, `getErrorTree()`, and `payload`/`context` when supplied.
@@ -438,8 +442,10 @@ package exports:
   `AccountVariableCreateInput`, `AccountVariableUpdateInput`, `SiteProxyInput` — the validated
   input shapes the corresponding write methods accept.
 - Response/query-parameter types for every other namespace (`Account`, `Site`, `Job`, `Filter`,
-  `Variable`, `AuthUser`, `RateStatusResponse`, `GetSitesParams`, …) — see `src/public-types.ts` in
-  the package source for the complete, curated list.
+  `Variable`, `AuthUser`, `RateStatusResponse`, `GetSitesParams`, …) — see
+  [`src/public-types.ts`](https://github.com/pncit/datto-rmm-api-client/blob/main/src/public-types.ts)
+  in the repository for the complete, curated list (the published package ships only `dist` and
+  its `.d.ts` files — not `src` — so `dist/index.d.ts` is the on-disk equivalent once installed).
 
 This is a deliberately **curated** re-export, not a wildcard export of the internal generated
 types — the raw generated `Device`/`Alert` shapes (literal `udf1`…`udf300` properties, the spec's
