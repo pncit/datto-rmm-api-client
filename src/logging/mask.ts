@@ -32,28 +32,54 @@ function mask(value: unknown): string {
 }
 
 /**
+ * True for a plain data object — one created as `{}` or via `Object.create(null)` —
+ * as opposed to a `Date`, `Error`, `Map`/`Set`, or other class instance. Wire-derived
+ * UDF structures are always JSON, i.e. plain objects/arrays/scalars, so `scrub` only
+ * needs to (and should only) recurse into these; a non-plain object's data mostly
+ * lives outside its own-enumerable keys (e.g. `Error#message`/`#stack`) and would be
+ * silently destroyed by rebuilding it from `Object.entries`.
+ */
+function isPlainObject(value: object): boolean {
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
  * Recursively walks a log call's `meta` object, replacing every non-null value under
  * a `udf<N>` key — at any nesting depth, including inside a nested `udf` record — with
  * a redacted placeholder. Null/absent UDF values and all non-UDF structure pass through
- * unchanged.
+ * unchanged. Recursion is restricted to arrays and plain objects (see
+ * {@link isPlainObject}); any other object (`Date`, `Error`, `Map`, a class instance,
+ * …) is returned as-is rather than flattened.
  */
 function scrub(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(scrub);
   }
-  if (value !== null && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [key, entryValue] of Object.entries(
-      value as Record<string, unknown>,
-    )) {
-      out[key] =
-        UDF_KEY.test(key) && entryValue != null
-          ? mask(entryValue)
-          : scrub(entryValue);
-    }
-    return out;
+  if (value !== null && typeof value === "object" && isPlainObject(value)) {
+    return scrubMeta(value as Record<string, unknown>);
   }
   return value;
+}
+
+/**
+ * Scrubs a plain record's top-level entries (redacting UDF keys, recursing into
+ * non-UDF ones via {@link scrub}). This is the typed entry point `withUdfMasking` uses
+ * to cross out of `scrub`'s `unknown -> unknown` signature: a `DattoLogger` call's
+ * `meta` is always a `Record<string, unknown>` (never an array — see `DattoLogger`'s
+ * parameter type), so this function's real `Record -> Record` return type asserts the
+ * boundary correctly instead of relying on a cast that a future edit to `scrub` could
+ * silently invalidate.
+ */
+function scrubMeta(meta: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, entryValue] of Object.entries(meta)) {
+    out[key] =
+      UDF_KEY.test(key) && entryValue != null
+        ? mask(entryValue)
+        : scrub(entryValue);
+  }
+  return out;
 }
 
 /**
@@ -70,14 +96,14 @@ function scrub(value: unknown): unknown {
  */
 export function withUdfMasking(logger: DattoLogger): DattoLogger {
   const wrap =
-    (fn: DattoLogger["debug"]): DattoLogger["debug"] =>
+    (method: "debug" | "info" | "warn" | "error"): DattoLogger[typeof method] =>
     (message, meta) =>
-      fn(message, meta ? (scrub(meta) as Record<string, unknown>) : meta);
+      logger[method](message, meta ? scrubMeta(meta) : meta);
 
   return {
-    debug: wrap(logger.debug),
-    info: wrap(logger.info),
-    warn: wrap(logger.warn),
-    error: wrap(logger.error),
+    debug: wrap("debug"),
+    info: wrap("info"),
+    warn: wrap("warn"),
+    error: wrap("error"),
   };
 }

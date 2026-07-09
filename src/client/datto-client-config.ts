@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import { DEFAULT_RETRY, DEFAULT_TOKEN_REFRESH_PCT } from "@/defaults";
-import { dattoLoggerSchema } from "@/logging/logger";
+import { DEFAULT_RETRY, DEFAULT_TOKEN_REFRESH_PCT } from "../defaults";
+import { dattoLoggerSchema } from "../logging/logger";
 
 /**
  * Zod schema for an optional retry-policy override.

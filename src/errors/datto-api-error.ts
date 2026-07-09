@@ -55,27 +55,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Returns the first value in `record` whose key is in `keys` (in order) and is a
+ * non-empty string, or `undefined` if none match. Shared by {@link extractErrorMessage}
+ * (over {@link ERROR_MESSAGE_KEYS}) and {@link extractRequestId} (over
+ * {@link REQUEST_ID_HEADERS}) — both scan an ordered candidate-key list for the first
+ * usable string value.
+ */
+function firstNonEmptyString(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Extracts a human-readable error message from an unknown response payload. Checks
- * common message-bearing keys before falling back to JSON serialization.
+ * common message-bearing keys before falling back to JSON serialization. An absent,
+ * `null`, or empty/whitespace-only string body falls back to `fallbackMessage`
+ * (typically Axios's own descriptive `err.message`) rather than surfacing an empty or
+ * literal `"null"` message.
  */
 function extractErrorMessage(
   responseData: unknown,
   fallbackMessage: string,
 ): string {
-  if (responseData === undefined) {
+  if (responseData == null) {
     return fallbackMessage;
   }
 
   if (typeof responseData === "string") {
-    return responseData;
+    return responseData.trim().length > 0 ? responseData : fallbackMessage;
   }
 
   if (isRecord(responseData)) {
-    for (const key of ERROR_MESSAGE_KEYS) {
-      const value = responseData[key];
-      if (typeof value === "string" && value.length > 0) {
-        return value;
-      }
+    const message = firstNonEmptyString(responseData, ERROR_MESSAGE_KEYS);
+    if (message !== undefined) {
+      return message;
     }
   }
 
@@ -93,14 +114,10 @@ function extractRequestId(
   if (!headers) {
     return undefined;
   }
-  const record = headers as Record<string, unknown>;
-  for (const key of REQUEST_ID_HEADERS) {
-    const value = record[key];
-    if (typeof value === "string" && value.length > 0) {
-      return value;
-    }
-  }
-  return undefined;
+  return firstNonEmptyString(
+    headers as Record<string, unknown>,
+    REQUEST_ID_HEADERS,
+  );
 }
 
 /**

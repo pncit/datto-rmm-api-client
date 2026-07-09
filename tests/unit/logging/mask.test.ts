@@ -99,6 +99,51 @@ describe("withUdfMasking", () => {
     });
   });
 
+  it("passes a Date and an Error under a non-UDF key through intact", () => {
+    const { logger, sink } = makeSink();
+    const masked = withUdfMasking(logger);
+    const since = new Date("2024-01-01T00:00:00.000Z");
+    const err = new Error("boom");
+
+    masked.error("grant failed", { since, err, udf1: "secret" });
+
+    expect(sink).toHaveBeenCalledTimes(1);
+    const [, meta] = sink.mock.calls[0] as [string, Record<string, unknown>];
+    expect(meta.since).toBe(since);
+    expect(meta.err).toBe(err);
+    expect((meta.err as Error).message).toBe("boom");
+    expect(meta.udf1).toBe("[redacted - 6 characters]");
+  });
+
+  it("preserves `this` for a logger whose methods are prototype methods bound at call time", () => {
+    class RecordingLogger {
+      public calls: Array<[string, Record<string, unknown> | undefined]> = [];
+      private readonly prefix = "[test] ";
+
+      debug(message: string, meta?: Record<string, unknown>): void {
+        this.calls.push([this.prefix + message, meta]);
+      }
+      info(message: string, meta?: Record<string, unknown>): void {
+        this.calls.push([this.prefix + message, meta]);
+      }
+      warn(message: string, meta?: Record<string, unknown>): void {
+        this.calls.push([this.prefix + message, meta]);
+      }
+      error(message: string, meta?: Record<string, unknown>): void {
+        this.calls.push([this.prefix + message, meta]);
+      }
+    }
+
+    const instance = new RecordingLogger();
+    const masked = withUdfMasking(instance);
+
+    expect(() => masked.info("device audit", { udf1: "secret" })).not.toThrow();
+
+    expect(instance.calls).toEqual([
+      ["[test] device audit", { udf1: "[redacted - 6 characters]" }],
+    ]);
+  });
+
   it("never throws on a udf value JSON.stringify cannot serialize", () => {
     const { logger, sink } = makeSink();
     const masked = withUdfMasking(logger);

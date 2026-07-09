@@ -118,6 +118,39 @@ describe("DattoApiError", () => {
       expect(err.code).toBeUndefined();
     });
 
+    it("falls back to the axios message for a null response body", () => {
+      const axiosErr = makeAxiosError({
+        message: "Request failed with status code 500",
+        response: { status: 500, data: null },
+      });
+
+      const err = DattoApiError.fromAxiosError(axiosErr);
+
+      expect(err.message).toBe("Request failed with status code 500");
+    });
+
+    it("falls back to the axios message for an empty-string response body", () => {
+      const axiosErr = makeAxiosError({
+        message: "Request failed with status code 500",
+        response: { status: 500, data: "" },
+      });
+
+      const err = DattoApiError.fromAxiosError(axiosErr);
+
+      expect(err.message).toBe("Request failed with status code 500");
+    });
+
+    it("falls back to the axios message for a whitespace-only response body", () => {
+      const axiosErr = makeAxiosError({
+        message: "Request failed with status code 500",
+        response: { status: 500, data: "   " },
+      });
+
+      const err = DattoApiError.fromAxiosError(axiosErr);
+
+      expect(err.message).toBe("Request failed with status code 500");
+    });
+
     it("falls back to JSON serialization when the response body has no known message key", () => {
       const axiosErr = makeAxiosError({
         response: { status: 400, data: { field: "apiKey", reason: "missing" } },
