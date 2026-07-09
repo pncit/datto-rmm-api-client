@@ -377,14 +377,19 @@ describe("BaseResource", () => {
 
   describe("httpDelete", () => {
     it("sends no body/response validation and tags { kind: 'write', opKey }", async () => {
-      const scope = nock(BASE_URL).delete("/filter/uid-1").reply(204);
+      const scope = nock(BASE_URL).delete("/site/uid-1/variable/1").reply(204);
       const { instance, descriptors } = createTrackedAxios();
       const resource = new TestResource(instance, createMockLogger());
 
-      const result = await resource.del("/filter/uid-1", "filter-delete");
+      const result = await resource.del(
+        "/site/uid-1/variable/1",
+        "site-variable-set",
+      );
 
       expect(result).toBeUndefined();
-      expect(descriptors).toEqual([{ kind: "write", opKey: "filter-delete" }]);
+      expect(descriptors).toEqual([
+        { kind: "write", opKey: "site-variable-set" },
+      ]);
       expect(scope.isDone()).toBe(true);
     });
   });

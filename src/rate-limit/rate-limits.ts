@@ -35,8 +35,6 @@ export const WRITE_LIMITS = {
   "device-warranty-set": 100,
   "device-proxy-set": 100,
   "user-reset-keys": 100,
-  "filter-create": 100,
-  "filter-delete": 100,
 } as const;
 
 /**

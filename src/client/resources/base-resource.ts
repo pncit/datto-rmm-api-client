@@ -330,9 +330,10 @@ export abstract class BaseResource {
   }
 
   /**
-   * Performs a `DELETE` request. Datto's delete endpoints (`filter-delete` and friends) carry no
-   * request body and no meaningful response body — the server signals success with a 2xx — so,
-   * unlike the other write primitives, there is nothing to validate on either side.
+   * Performs a `DELETE` request. Datto's delete endpoints (`deleteVariable`, `deleteProxy`, and
+   * friends) carry no request body and no meaningful response body — the server signals success
+   * with a 2xx — so, unlike the other write primitives, there is nothing to validate on either
+   * side.
    *
    * @param path - API endpoint path, including any query string
    * @param opKey - The write rate-limit key for this operation (`src/rate-limit/rate-limits.ts`)

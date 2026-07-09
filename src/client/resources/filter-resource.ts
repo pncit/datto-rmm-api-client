@@ -13,14 +13,9 @@ import { narrow } from "./narrow";
  * `-v2-site`-tagged), a *site*-scoped filter read that returns the same `Filter` entity via the
  * shared `filterSchema` (`./filter-schema.ts`) rather than a per-file duplicate.
  *
- * **No write operations exist for this namespace.** Phase 5's rate-limit table carries
- * `'filter-create'`/`'filter-delete'` `WriteOpKey` entries (flagged as a possible future gap in
- * Phase 6/7's remaining-risks notes); direct enumeration of the committed `spec/openapi.json`
- * confirms the `-v2-filter` tag declares only the two reads below — no create/delete operation
- * exists at all. Those two table entries are therefore dead (unreachable via any typed resource
- * call), not an omission of this class; they are left in place rather than removed, since deleting
- * a rate-limit table entry is Phase 5's file to own and doing so here would be scope creep for a
- * defensive, harmless no-op.
+ * **No write operations exist for this namespace.** Direct enumeration of the committed
+ * `spec/openapi.json` confirms the `-v2-filter` tag declares only the two reads below — no
+ * create/delete operation exists at all, so no `WriteOpKey` entries exist for it either.
  */
 export class FilterResource extends BaseResource {
   /** `GET /api/v2/filter/default-filters` — the account's default device filters, fully
