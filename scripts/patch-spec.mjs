@@ -19,7 +19,11 @@
  *    `.regex()`, which does not exist on `ZodNumber`/`ZodBoolean`/etc.), and a redundant
  *    top-level `enum` on an `array`-typed schema that already carries the real enum on `items`
  *    (Orval chains `.enum(...)` onto the already-built `zod.array(...)`, which is not a
- *    `ZodArray` method). Both are confirmed, as-is, in the committed `spec/openapi.json`
+ *    `ZodArray` method). The array-enum fix only deletes the top-level `enum` when `items` genuinely
+ *    carries its own `enum` — the precondition that makes the top-level one redundant; an
+ *    array-typed schema whose only enum constraint sits at the array level (no `items.enum`) is
+ *    left untouched, since deleting it there would silently change the constraint rather than
+ *    remove a duplicate. Both classes are confirmed, as-is, in the committed `spec/openapi.json`
  *    (`ActivityLog.date`, the `entities` query parameter of `GET /v2/activity-logs`) — found by
  *    actually running `npm run generate` + `npm run typecheck` against the real spec, not
  *    anticipated in advance.
@@ -232,7 +236,11 @@ function fixMalformedNonStringConstraints(spec) {
       delete node.pattern;
       patternOnNonStringFixed++;
     }
-    if (node.type === "array" && Array.isArray(node.enum)) {
+    if (
+      node.type === "array" &&
+      Array.isArray(node.enum) &&
+      Array.isArray(node.items?.enum)
+    ) {
       delete node.enum;
       redundantArrayEnumFixed++;
     }

@@ -211,6 +211,21 @@ describe("patchSpec", () => {
     expect(entities.items!.enum).toEqual(["device", "user"]);
   });
 
+  test("leaves an array-level enum untouched when items carries no enum of its own (not redundant)", () => {
+    const spec = buildValidSpecFragment();
+    spec.components.schemas.Device.properties!.oddArrayField = {
+      type: "array",
+      enum: ["device", "user"],
+      items: { type: "string" },
+    };
+
+    patchSpec(spec);
+
+    const oddArrayField = spec.components.schemas.Device.properties!.oddArrayField;
+    expect(oddArrayField.enum).toEqual(["device", "user"]);
+    expect(oddArrayField.items!.enum).toBeUndefined();
+  });
+
   test("applying patchSpec to the same original fragment twice produces byte-identical output", () => {
     // patch-spec.mjs's CLI entrypoint always re-reads the frozen spec/openapi.json from scratch
     // (never re-patches its own prior output — see main()); this is the guarantee that matters
