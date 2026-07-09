@@ -60,10 +60,23 @@
  * resolved in `scripts/patch-spec.mjs` (see `REQUEST_RESPONSE_SPLITS`) by cloning the schema so
  * the request and response paths no longer share a generated TS type; this check is the
  * regression guard that would catch a *future* refresh reintroducing the same hazard elsewhere.
+ *
+ * ## Post-conditions (`verifyWideningHappened`)
+ *
+ * The discrimination mechanism, and the widening itself, both rest entirely on regexes matched
+ * against Orval's exact current generated-output text (`IMPORT_RE`, `ENUM_ALIAS_RE`). Neither had
+ * any assertion that it matched anything, so a future Orval/formatter change that silently breaks
+ * those regexes would widen 0 files (or under-widen) with a plausible-looking log line and exit
+ * 0 — no other Phase 2 gate catches this (reproducibility only proves committed == regenerated,
+ * not that widening happened at all). `main()` now asserts two invariants derived from the
+ * *patched spec* — not from the same generated-file text the widening pass parses, so a format
+ * drift in that text can't defeat its own check — after the widening pass runs.
  */
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { walkSchema } from "./lib/schema-walk.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PATCHED_SPEC_PATH = resolve(__dirname, "../spec/openapi.patched.json");
@@ -117,40 +130,18 @@ function refName(ref) {
  * non-$ref cycles within a single schema tree).
  */
 function collectComponentRefs(node, schemas, visitedRefs, visitedNodes) {
-  if (!node || typeof node !== "object") return;
-  if (visitedNodes.has(node)) return;
-  visitedNodes.add(node);
-
-  if (typeof node.$ref === "string") {
-    const name = refName(node.$ref);
-    if (!visitedRefs.has(name)) {
-      visitedRefs.add(name);
-      collectComponentRefs(schemas[name], schemas, visitedRefs, visitedNodes);
-    }
-    return;
-  }
-
-  for (const propSchema of Object.values(node.properties ?? {})) {
-    collectComponentRefs(propSchema, schemas, visitedRefs, visitedNodes);
-  }
-  if (node.items)
-    collectComponentRefs(node.items, schemas, visitedRefs, visitedNodes);
-  if (
-    node.additionalProperties &&
-    typeof node.additionalProperties === "object"
-  ) {
-    collectComponentRefs(
-      node.additionalProperties,
-      schemas,
-      visitedRefs,
-      visitedNodes,
-    );
-  }
-  for (const keyword of ["allOf", "oneOf", "anyOf"]) {
-    for (const sub of node[keyword] ?? []) {
-      collectComponentRefs(sub, schemas, visitedRefs, visitedNodes);
-    }
-  }
+  walkSchema(
+    node,
+    (subNode) => {
+      if (typeof subNode.$ref !== "string") return;
+      const name = refName(subNode.$ref);
+      if (!visitedRefs.has(name)) {
+        visitedRefs.add(name);
+        collectComponentRefs(schemas[name], schemas, visitedRefs, visitedNodes);
+      }
+    },
+    visitedNodes,
+  );
 }
 
 /** True if `name`'s own schema, or any schema nested within it, declares an `enum`. */
@@ -161,28 +152,21 @@ function componentHasEnum(name, schemas, visitedNames) {
 }
 
 function schemaHasEnum(node, schemas, visitedNames) {
-  if (!node || typeof node !== "object") return false;
-  if (Array.isArray(node.enum)) return true;
-  if (typeof node.$ref === "string")
-    return componentHasEnum(refName(node.$ref), schemas, visitedNames);
-  for (const propSchema of Object.values(node.properties ?? {})) {
-    if (schemaHasEnum(propSchema, schemas, visitedNames)) return true;
-  }
-  if (node.items && schemaHasEnum(node.items, schemas, visitedNames))
-    return true;
-  if (
-    node.additionalProperties &&
-    typeof node.additionalProperties === "object" &&
-    schemaHasEnum(node.additionalProperties, schemas, visitedNames)
-  ) {
-    return true;
-  }
-  for (const keyword of ["allOf", "oneOf", "anyOf"]) {
-    for (const sub of node[keyword] ?? []) {
-      if (schemaHasEnum(sub, schemas, visitedNames)) return true;
+  let found = false;
+  walkSchema(node, (subNode) => {
+    if (found) return;
+    if (Array.isArray(subNode.enum)) {
+      found = true;
+      return;
     }
-  }
-  return false;
+    if (
+      typeof subNode.$ref === "string" &&
+      componentHasEnum(refName(subNode.$ref), schemas, visitedNames)
+    ) {
+      found = true;
+    }
+  });
+  return found;
 }
 
 /** Builds `{ requestReach, responseReach }`: component name -> Set of `METHOD /path` labels. */
@@ -233,6 +217,9 @@ function buildReachabilityMaps(spec) {
 /**
  * Named component schemas reachable from a requestBody and from no response, PascalCased to
  * match Orval's generated type names (e.g. `'Variable Creation Request'` -> `'VariableCreationRequest'`).
+ *
+ * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
+ * @returns {Set<string>}
  */
 export function computeRequestOnlyComponentNames(spec) {
   const { requestReach, responseReach } = buildReachabilityMaps(spec);
@@ -247,6 +234,9 @@ export function computeRequestOnlyComponentNames(spec) {
  * Throws if any named component schema is reachable from both a requestBody and a response
  * while declaring an enum (directly or in a nested schema) — see the module doc for why this
  * would break the request/response discrimination the widening pass depends on.
+ *
+ * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
+ * @returns {void}
  */
 export function verifyNoSharedEnumBearingSchemas(spec) {
   const schemas = spec.components?.schemas ?? {};
@@ -330,42 +320,69 @@ function expandExcludedNames(roots, nameToImports) {
 }
 
 /**
+ * Parses every file exactly once, returning the data both `widenGeneratedTypes` (the transform)
+ * and `main`'s post-condition check need: each declared name's own imports (for transitive
+ * exclusion expansion), the "root" subset of those names that are request-side by construction
+ * (suffix match or in the spec-derived request-only set), and each file's own declared names (so
+ * a second pass over the same files never has to re-parse them).
+ *
+ * @param {Map<string, string>} fileContentsByName
+ * @param {Set<string>} requestOnlyComponentNames
+ * @returns {{
+ *   nameToImports: Map<string, Set<string>>,
+ *   rootExcludedNames: Set<string>,
+ *   primaryNamesByFile: Map<string, Set<string>>,
+ * }}
+ */
+export function computeRootExclusion(fileContentsByName, requestOnlyComponentNames) {
+  const nameToImports = new Map();
+  const rootExcludedNames = new Set();
+  const primaryNamesByFile = new Map();
+
+  for (const [fileName, content] of fileContentsByName) {
+    const { importNames, primaryNames } = parseGeneratedFile(content);
+    primaryNamesByFile.set(fileName, primaryNames);
+    for (const name of primaryNames) {
+      nameToImports.set(name, importNames);
+      if (isRequestRootName(name, requestOnlyComponentNames)) {
+        rootExcludedNames.add(name);
+      }
+    }
+  }
+
+  return { nameToImports, rootExcludedNames, primaryNamesByFile };
+}
+
+function applyWidening(fileContentsByName, primaryNamesByFile, excludedNames) {
+  const result = new Map();
+  for (const [fileName, content] of fileContentsByName) {
+    const primaryNames = primaryNamesByFile.get(fileName);
+    const isExcludedFile = [...primaryNames].some((name) =>
+      excludedNames.has(name),
+    );
+    result.set(fileName, isExcludedFile ? content : widenEnumAliasLine(content));
+  }
+  return result;
+}
+
+/**
  * Pure widening pass over an in-memory `{ fileName -> content }` map (excludes `index.ts` —
  * pass only the generated model files). Returns a new map with the same keys; entries whose
  * content is unchanged are returned byte-identical (so a caller can diff to decide whether to
  * write), making the transform trivially idempotent.
+ *
+ * @param {Map<string, string>} fileContentsByName
+ * @param {Set<string>} requestOnlyComponentNames
+ * @returns {Map<string, string>}
  */
 export function widenGeneratedTypes(
   fileContentsByName,
   requestOnlyComponentNames,
 ) {
-  const nameToImports = new Map();
-  const fileNamesByPrimaryName = new Map();
-  const rootExcluded = new Set();
-
-  for (const [fileName, content] of fileContentsByName) {
-    const { importNames, primaryNames } = parseGeneratedFile(content);
-    for (const name of primaryNames) {
-      nameToImports.set(name, importNames);
-      fileNamesByPrimaryName.set(name, fileName);
-      if (isRequestRootName(name, requestOnlyComponentNames)) {
-        rootExcluded.add(name);
-      }
-    }
-  }
-
-  const excluded = expandExcludedNames(rootExcluded, nameToImports);
-
-  const result = new Map();
-  for (const [fileName, content] of fileContentsByName) {
-    const { primaryNames } = parseGeneratedFile(content);
-    const isExcludedFile = [...primaryNames].some((name) => excluded.has(name));
-    result.set(
-      fileName,
-      isExcludedFile ? content : widenEnumAliasLine(content),
-    );
-  }
-  return result;
+  const { nameToImports, rootExcludedNames, primaryNamesByFile } =
+    computeRootExclusion(fileContentsByName, requestOnlyComponentNames);
+  const excluded = expandExcludedNames(rootExcludedNames, nameToImports);
+  return applyWidening(fileContentsByName, primaryNamesByFile, excluded);
 }
 
 function walkTsFiles(dir) {
@@ -383,6 +400,61 @@ function walkTsFiles(dir) {
   return files;
 }
 
+/**
+ * Fail-loud post-conditions on the widening pass, derived from the patched spec rather than from
+ * the generated-file text the widening pass itself parses (so a format drift in that text can't
+ * defeat its own check):
+ *
+ *  - If any named component schema reachable from a response carries an enum (directly or
+ *    nested) — which `verifyNoSharedEnumBearingSchemas` already proves cannot also be reachable
+ *    from a request — at least one generated file must have been widened. Catches a future
+ *    Orval/formatter change that makes `ENUM_ALIAS_RE`/`IMPORT_RE` silently stop matching:
+ *    `changedCount` would otherwise stay 0 with no other symptom.
+ *  - If the spec-derived request-only-component set is non-empty, at least one of those names
+ *    must have resolved to a declared name in some generated file. Catches a mismatch between
+ *    `computeRequestOnlyComponentNames`'s PascalCasing and Orval's actual naming (the
+ *    discrimination graph silently excluding nothing it was supposed to).
+ *
+ * This does not, and cannot without reimplementing Orval's exact naming algorithm, prove every
+ * individual response enum was widened and every individual request enum was excluded — it
+ * proves the mechanism engaged at all, on both its inclusion and exclusion sides, instead of
+ * silently no-op'ing.
+ *
+ * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
+ * @param {Set<string>} requestOnlyComponentNames
+ * @param {Set<string>} rootExcludedNames
+ * @param {number} changedCount
+ * @returns {void}
+ */
+export function verifyWideningHappened(
+  spec,
+  requestOnlyComponentNames,
+  rootExcludedNames,
+  changedCount,
+) {
+  const schemas = spec.components?.schemas ?? {};
+  const { responseReach } = buildReachabilityMaps(spec);
+  const hasResponseEnum = [...responseReach.keys()].some((name) =>
+    componentHasEnum(name, schemas, new Set()),
+  );
+  if (hasResponseEnum && changedCount === 0) {
+    throw new Error(
+      "widen-response-enums: the patched spec has at least one response-reachable, enum-bearing " +
+        "component schema, but 0 generated files were widened — ENUM_ALIAS_RE/IMPORT_RE likely no " +
+        "longer match Orval's generated output shape",
+    );
+  }
+
+  if (requestOnlyComponentNames.size > 0 && rootExcludedNames.size === 0) {
+    throw new Error(
+      "widen-response-enums: the patched spec has request-only component schema(s) " +
+        `(${[...requestOnlyComponentNames].sort().join(", ")}), but none resolved to a declared ` +
+        "type name in any generated file — computeRequestOnlyComponentNames's PascalCasing may no " +
+        "longer match Orval's naming",
+    );
+  }
+}
+
 function main() {
   const patchedSpec = JSON.parse(readFileSync(PATCHED_SPEC_PATH, "utf8"));
   verifyNoSharedEnumBearingSchemas(patchedSpec);
@@ -398,10 +470,10 @@ function main() {
     ]),
   );
 
-  const widened = widenGeneratedTypes(
-    fileContentsByName,
-    requestOnlyComponentNames,
-  );
+  const { nameToImports, rootExcludedNames, primaryNamesByFile } =
+    computeRootExclusion(fileContentsByName, requestOnlyComponentNames);
+  const excluded = expandExcludedNames(rootExcludedNames, nameToImports);
+  const widened = applyWidening(fileContentsByName, primaryNamesByFile, excluded);
 
   let changedCount = 0;
   for (const [relPath, content] of widened) {
@@ -410,6 +482,14 @@ function main() {
       changedCount++;
     }
   }
+
+  verifyWideningHappened(
+    patchedSpec,
+    requestOnlyComponentNames,
+    rootExcludedNames,
+    changedCount,
+  );
+
   console.log(
     `widen-response-enums: widened enum type(s) in ${changedCount} file(s)`,
   );

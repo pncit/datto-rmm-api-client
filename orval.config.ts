@@ -26,6 +26,15 @@ import { defineConfig } from "orval";
  * Input is the PATCHED spec (spec/openapi.patched.json), produced by
  * scripts/patch-spec.mjs from the committed spec/openapi.json (Phase 2). Overridable via
  * DATTO_OPENAPI_SPEC for local experimentation.
+ *
+ * Both targets set `output.clean: true`: Orval only ever writes the files a given generation
+ * pass actually produces, so if a spec refresh removes a component schema (or patch-spec.mjs's
+ * own alertContext correction prunes now-dead components — see patch-spec.mjs's
+ * `pruneOrphanedContextSchemas`), the type/schema files that schema used to generate are
+ * silently left behind on disk, stale and unreferenced, rather than deleted. `clean: true` makes
+ * `npm run generate` remove every non-`.d.ts` file under each target's output directory before
+ * writing, so the committed `src/generated/**` always reflects exactly the current patched spec
+ * — never a superset accumulated across regenerations.
  */
 const spec =
   process.env.DATTO_OPENAPI_SPEC ??
@@ -39,6 +48,7 @@ export default defineConfig({
       target: "./src/generated/endpoints/api.ts",
       schemas: "./src/generated/types",
       client: "axios",
+      clean: true,
     },
   },
   dattoZod: {
@@ -48,6 +58,7 @@ export default defineConfig({
       client: "zod",
       target: "./src/generated/schemas/api.zod.ts",
       fileExtension: ".zod.ts",
+      clean: true,
       override: {
         zod: {
           strict: {

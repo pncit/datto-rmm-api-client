@@ -38,3 +38,36 @@ export const getAlertParams = zod.strictObject({
   "alertUid": zod.string()
 })
 
+export const getAlertResponse = zod.object({
+  "alertUid": zod.string().optional(),
+  "priority": zod.enum(['Critical', 'High', 'Moderate', 'Low', 'Information', 'Unknown']).optional(),
+  "diagnostics": zod.string().optional(),
+  "resolved": zod.boolean().optional(),
+  "resolvedBy": zod.string().optional(),
+  "resolvedOn": zod.number().optional(),
+  "muted": zod.boolean().optional(),
+  "ticketNumber": zod.string().optional(),
+  "timestamp": zod.number().optional(),
+  "alertMonitorInfo": zod.object({
+  "sendsEmails": zod.boolean().optional(),
+  "createsTicket": zod.boolean().optional()
+}).optional().describe('Alert monitor information'),
+  "alertContext": zod.object({
+  "@class": zod.string().optional()
+}).optional().describe('Alert context; polymorphic on the wire\'s Jackson \'@class\' discriminator. The spec\'s generated \*Context schemas do not model the real property sets, so this is a permissive open object rather than a oneOf.'),
+  "alertSourceInfo": zod.object({
+  "deviceUid": zod.string().optional(),
+  "deviceName": zod.string().optional(),
+  "siteUid": zod.string().optional(),
+  "siteName": zod.string().optional()
+}).optional().describe('Alert source information data'),
+  "responseActions": zod.array(zod.object({
+  "actionTime": zod.iso.datetime({}).optional(),
+  "actionType": zod.enum(['EMAIL_SENT', 'EMAIL_SEND_ERROR', 'TICKET_PENDING', 'TICKET_CREATED', 'TICKET_CREATION_ERROR', 'TICKET_CLOSED_CALL', 'COMPONENT', 'WEBHOOK_EXECUTED', 'WEBHOOK_EXECUTION_ERROR']).optional(),
+  "description": zod.string().optional(),
+  "actionReference": zod.string().optional(),
+  "actionReferenceInt": zod.string().optional()
+})).optional(),
+  "autoresolveMins": zod.number().optional()
+}).describe('Alert data')
+

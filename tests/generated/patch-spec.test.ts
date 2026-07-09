@@ -4,29 +4,25 @@ import {
   patchSpec,
   TIMESTAMP_FIELDS,
   REQUEST_RESPONSE_SPLITS,
+  EXPECTED_ORPHANED_COMPONENTS,
 } from "../../scripts/patch-spec.mjs";
 
 /**
- * A minimal, deliberately loose structural type for the tiny OpenAPI-shaped fragments these
- * tests build — mirroring how patch-spec.mjs itself treats the spec (a plain, dynamically
- * shaped JSON document navigated with optional chaining, not a strongly-typed OpenAPI model).
+ * The same `SchemaNode`/`OpenApiSpecFragment` shape `patch-spec.mjs` and `widen-response-enums.mjs`
+ * themselves are typed against (see `scripts/lib/schema-walk.mjs`), reused here rather than
+ * duplicated so a real call into `patchSpec` is checked structurally against the exact type its
+ * own JSDoc declares — not a second, potentially-diverging local approximation of it.
  */
-interface SchemaNode {
-  type?: string;
-  format?: string;
-  enum?: string[];
-  oneOf?: unknown[];
-  $ref?: string;
-  properties?: Record<string, SchemaNode>;
-  items?: SchemaNode;
-  additionalProperties?: boolean | SchemaNode;
-  [key: string]: unknown;
-}
+type SchemaNode = import("../../scripts/lib/schema-walk.mjs").SchemaNode;
 
 interface SpecFragment {
   openapi: string;
-  paths: Record<string, unknown>;
+  paths: Record<
+    string,
+    Record<string, import("../../scripts/lib/schema-walk.mjs").OpenApiOperation>
+  >;
   components: { schemas: Record<string, SchemaNode> };
+  [key: string]: unknown;
 }
 
 /**
@@ -92,6 +88,26 @@ function buildValidSpecFragment(): SpecFragment {
           },
         },
       },
+    },
+  };
+}
+
+/**
+ * Adds (or extends) a single `paths[pathKey][method]` operation onto a copy of `fragment`'s
+ * `paths`, leaving every other anchor `buildValidSpecFragment` already carries untouched — so
+ * each test below exercises exactly one extra operation against an otherwise-valid fragment.
+ */
+function withOperation(
+  fragment: SpecFragment,
+  pathKey: string,
+  method: string,
+  operation: import("../../scripts/lib/schema-walk.mjs").OpenApiOperation,
+): SpecFragment {
+  return {
+    ...fragment,
+    paths: {
+      ...fragment.paths,
+      [pathKey]: { ...(fragment.paths[pathKey] ?? {}), [method]: operation },
     },
   };
 }
@@ -235,5 +251,162 @@ describe("patchSpec", () => {
     const first = patchSpec(buildValidSpecFragment());
     const second = patchSpec(buildValidSpecFragment());
     expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  describe("missing success responses", () => {
+    test("synthesizes a 200 from a schema consistently misattached to error-code responses", () => {
+      const spec = withOperation(buildValidSpecFragment(), "/v2/widget/{id}", "get", {
+        responses: {
+          "401": {
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Device" } },
+            },
+          },
+          "403": {
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Device" } },
+            },
+          },
+          "500": { description: "Internal Server Error" },
+        },
+      });
+
+      patchSpec(spec);
+
+      const synthesized = spec.paths["/v2/widget/{id}"].get!.responses!["200"];
+      expect(synthesized).toBeDefined();
+      expect(synthesized.content!["application/json"].schema).toEqual({
+        $ref: "#/components/schemas/Device",
+      });
+    });
+
+    test("synthesizes a 200 from a schema under '*/*' content type, not just application/json", () => {
+      const spec = withOperation(buildValidSpecFragment(), "/v2/widget/{id}", "put", {
+        responses: {
+          "400": {
+            content: { "*/*": { schema: { $ref: "#/components/schemas/Device" } } },
+          },
+        },
+      });
+
+      patchSpec(spec);
+
+      const synthesized = spec.paths["/v2/widget/{id}"].put!.responses!["200"];
+      expect(synthesized.content!["application/json"].schema).toEqual({
+        $ref: "#/components/schemas/Device",
+      });
+    });
+
+    test("leaves a documented void-write operation without a 200/204 (no inferable schema anywhere)", () => {
+      const spec = withOperation(
+        buildValidSpecFragment(),
+        "/v2/alert/{alertUid}/resolve",
+        "post",
+        {
+          responses: {
+            "401": { description: "Request can not be authorized." },
+            "500": { description: "Internal Server Error" },
+          },
+        },
+      );
+
+      patchSpec(spec);
+
+      expect(
+        spec.paths["/v2/alert/{alertUid}/resolve"].post!.responses!["200"],
+      ).toBeUndefined();
+    });
+
+    test("throws when an undocumented operation has no 200/204 and no inferable response schema", () => {
+      const spec = withOperation(buildValidSpecFragment(), "/v2/widget", "post", {
+        responses: {
+          "401": { description: "Request can not be authorized." },
+          "500": { description: "Internal Server Error" },
+        },
+      });
+
+      expect(() => patchSpec(spec)).toThrow(/POST \/v2\/widget/);
+    });
+
+    test("throws when error-code responses carry inconsistent schemas (cannot safely synthesize)", () => {
+      const spec = withOperation(buildValidSpecFragment(), "/v2/widget/{id}", "get", {
+        responses: {
+          "401": {
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Device" } },
+            },
+          },
+          "403": {
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/AuthUser" } },
+            },
+          },
+        },
+      });
+
+      expect(() => patchSpec(spec)).toThrow(/GET \/v2\/widget\/\{id\}/);
+    });
+  });
+
+  describe("orphaned alertContext schema pruning", () => {
+    test("prunes *Context schemas orphaned by the alertContext rewrite, anchored to EXPECTED_ORPHANED_COMPONENTS", () => {
+      const spec = buildValidSpecFragment();
+      spec.components.schemas.Alert.properties!.alertContext = {
+        oneOf: [{ $ref: "#/components/schemas/ActionContext" }],
+      };
+      spec.components.schemas.ActionContext = {
+        type: "object",
+        allOf: [{ $ref: "#/components/schemas/AlertContext" }],
+        properties: { action: { type: "string" } },
+      };
+      spec.components.schemas.AlertContext = {
+        type: "object",
+        properties: { "@class": { type: "string" } },
+      };
+      expect(EXPECTED_ORPHANED_COMPONENTS).toContain("ActionContext");
+      expect(EXPECTED_ORPHANED_COMPONENTS).toContain("AlertContext");
+
+      patchSpec(spec);
+
+      expect(spec.components.schemas.ActionContext).toBeUndefined();
+      expect(spec.components.schemas.AlertContext).toBeUndefined();
+    });
+
+    test("throws when the alertContext rewrite orphans a component not documented in EXPECTED_ORPHANED_COMPONENTS", () => {
+      const spec = buildValidSpecFragment();
+      spec.components.schemas.Alert.properties!.alertContext = {
+        oneOf: [{ $ref: "#/components/schemas/MysteryContext" }],
+      };
+      spec.components.schemas.MysteryContext = { type: "object", properties: {} };
+
+      expect(() => patchSpec(spec)).toThrow(/MysteryContext/);
+    });
+
+    test("leaves a component referenced by the old alertContext oneOf alone if it's still reachable elsewhere", () => {
+      const spec = buildValidSpecFragment();
+      spec.components.schemas.Alert.properties!.alertContext = {
+        oneOf: [{ $ref: "#/components/schemas/ActionContext" }],
+      };
+      spec.components.schemas.ActionContext = {
+        type: "object",
+        properties: { action: { type: "string" } },
+      };
+      // Also reachable via a live operation — not actually orphaned by the rewrite.
+      spec.paths["/v2/widget/{id}"] = {
+        get: {
+          responses: {
+            "200": {
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ActionContext" } },
+              },
+            },
+          },
+        },
+      };
+
+      patchSpec(spec);
+
+      expect(spec.components.schemas.ActionContext).toBeDefined();
+    });
   });
 });

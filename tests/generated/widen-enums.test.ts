@@ -4,6 +4,7 @@ import {
   widenGeneratedTypes,
   computeRequestOnlyComponentNames,
   verifyNoSharedEnumBearingSchemas,
+  verifyWideningHappened,
 } from "../../scripts/widen-response-enums.mjs";
 
 function enumFile(name: string, members: string[]) {
@@ -343,5 +344,92 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
     };
 
     expect(() => verifyNoSharedEnumBearingSchemas(spec)).not.toThrow();
+  });
+});
+
+describe("verifyWideningHappened", () => {
+  const specWithResponseEnum = {
+    paths: {
+      "/device/{id}": {
+        get: {
+          responses: {
+            "200": {
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Device" } },
+              },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        Device: {
+          type: "object",
+          properties: { deviceClass: { type: "string", enum: ["device", "printer"] } },
+        },
+      },
+    },
+  };
+
+  test("throws when the spec has a response-reachable enum-bearing schema but 0 files were widened", () => {
+    expect(() =>
+      verifyWideningHappened(specWithResponseEnum, new Set(), new Set(), 0),
+    ).toThrow(/0 generated files were widened/);
+  });
+
+  test("does not throw when at least one file was widened for a spec with a response enum", () => {
+    expect(() =>
+      verifyWideningHappened(specWithResponseEnum, new Set(), new Set(), 1),
+    ).not.toThrow();
+  });
+
+  test("does not throw for a spec with no response-reachable enum at all, even if changedCount is 0", () => {
+    const specWithoutEnum = {
+      paths: {
+        "/device/{id}": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": { schema: { $ref: "#/components/schemas/Device" } },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Device: { type: "object", properties: { name: { type: "string" } } },
+        },
+      },
+    };
+
+    expect(() =>
+      verifyWideningHappened(specWithoutEnum, new Set(), new Set(), 0),
+    ).not.toThrow();
+  });
+
+  test("throws when the spec has request-only components but none resolved to an excluded declared name", () => {
+    expect(() =>
+      verifyWideningHappened(
+        specWithResponseEnum,
+        new Set(["Warranty"]),
+        new Set(),
+        1,
+      ),
+    ).toThrow(/Warranty/);
+  });
+
+  test("does not throw when the spec's request-only components resolved to at least one excluded name", () => {
+    expect(() =>
+      verifyWideningHappened(
+        specWithResponseEnum,
+        new Set(["Warranty"]),
+        new Set(["Warranty"]),
+        1,
+      ),
+    ).not.toThrow();
   });
 });

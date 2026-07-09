@@ -16,6 +16,23 @@ export const getDefaultsFiltersQueryParams = zod.strictObject({
   "max": zod.number().optional()
 })
 
+export const getDefaultsFiltersResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "filters": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "name": zod.string().optional(),
+  "description": zod.string().optional(),
+  "type": zod.enum(['rmm_default', 'custom', 'site']).optional(),
+  "dateCreate": zod.iso.datetime({}).optional(),
+  "lastUpdated": zod.iso.datetime({}).optional()
+}).describe('Filter data')).optional()
+}).describe('Filters page')
+
 /**
  * @summary Fetches the custom device filters for the user (using administrator role).
  */
@@ -23,4 +40,21 @@ export const getCustomFiltersQueryParams = zod.strictObject({
   "page": zod.number().optional(),
   "max": zod.number().optional()
 })
+
+export const getCustomFiltersResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "filters": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "name": zod.string().optional(),
+  "description": zod.string().optional(),
+  "type": zod.enum(['rmm_default', 'custom', 'site']).optional(),
+  "dateCreate": zod.iso.datetime({}).optional(),
+  "lastUpdated": zod.iso.datetime({}).optional()
+}).describe('Filter data')).optional()
+}).describe('Filters page')
 

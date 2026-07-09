@@ -18,3 +18,27 @@ export const getStatusResponse = zod.object({
   "started": zod.iso.datetime({}).optional()
 })
 
+/**
+ * @summary Fetches the request rate status for the authenticated user's account.
+ */
+export const getResponse = zod.object({
+  "slidingTimeWindowSizeSeconds": zod.number().optional(),
+  "accountUid": zod.string().optional(),
+  "accountCount": zod.number().optional(),
+  "accountRateLimit": zod.number().optional(),
+  "accountCutOffRatio": zod.number().optional(),
+  "accountWriteRateLimit": zod.number().optional(),
+  "accountWriteCount": zod.number().optional(),
+  "operationWriteStatus": zod.record(zod.string(), zod.object({
+  "limit": zod.number().optional(),
+  "count": zod.number().optional()
+})).optional()
+})
+
+/**
+ * @summary Fetches the pagination configurations.
+ */
+export const getPaginationConfigurationsResponse = zod.object({
+  "max": zod.number().optional().describe('Default and maximum number of elements per AEM page (except alerts pagination)')
+}).describe('Pagination configuration')
+

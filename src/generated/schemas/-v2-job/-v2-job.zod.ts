@@ -15,6 +15,14 @@ export const get1Params = zod.strictObject({
   "jobUid": zod.string()
 })
 
+export const get1Response = zod.object({
+  "id": zod.number().optional(),
+  "dateCreated": zod.iso.datetime({}).optional(),
+  "name": zod.string().optional(),
+  "uid": zod.string().optional(),
+  "status": zod.enum(['active', 'completed']).optional()
+}).describe('Job data')
+
 /**
  * @summary Fetches job results of the job identified by the job Uid for device identified by the device Uid.
  */
@@ -22,6 +30,21 @@ export const getJobResultsParams = zod.strictObject({
   "jobUid": zod.string(),
   "deviceUid": zod.string()
 })
+
+export const getJobResultsResponse = zod.object({
+  "jobUid": zod.string().optional(),
+  "deviceUid": zod.string().optional(),
+  "ranOn": zod.iso.datetime({}).optional(),
+  "jobDeploymentStatus": zod.enum(['Expired', 'Pending', 'Running', 'Success', 'Warning', 'Retired', 'Failure']).optional(),
+  "componentResults": zod.array(zod.object({
+  "componentUid": zod.string().optional(),
+  "componentName": zod.string().optional(),
+  "componentStatus": zod.enum(['Success', 'Failure']).optional(),
+  "numberOfWarnings": zod.number().optional(),
+  "hasStdOut": zod.boolean().optional(),
+  "hasStdErr": zod.boolean().optional()
+}).describe('Job component result data')).optional()
+}).describe('Job results data')
 
 /**
  * @summary Fetches data of the job's StdOut identified by the given job Uid and device Uid.
@@ -31,6 +54,13 @@ export const getStdOutParams = zod.strictObject({
   "deviceUid": zod.string()
 })
 
+export const getStdOutResponseItem = zod.object({
+  "componentUid": zod.string().optional(),
+  "componentName": zod.string().optional(),
+  "stdData": zod.string().optional()
+}).describe('Job Std data')
+export const getStdOutResponse = zod.array(getStdOutResponseItem)
+
 /**
  * @summary Fetches data of the job's StdErr identified by the given job Uid and device Uid.
  */
@@ -38,6 +68,13 @@ export const getStdErrParams = zod.strictObject({
   "jobUid": zod.string(),
   "deviceUid": zod.string()
 })
+
+export const getStdErrResponseItem = zod.object({
+  "componentUid": zod.string().optional(),
+  "componentName": zod.string().optional(),
+  "stdData": zod.string().optional()
+}).describe('Job Std data')
+export const getStdErrResponse = zod.array(getStdErrResponseItem)
 
 /**
  * @summary Fetches components of the job identified by the given job Uid.
@@ -50,4 +87,21 @@ export const getJobComponentsQueryParams = zod.strictObject({
   "page": zod.number().optional(),
   "max": zod.number().optional()
 })
+
+export const getJobComponentsResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "jobComponents": zod.array(zod.object({
+  "uid": zod.string().optional(),
+  "name": zod.string().optional(),
+  "variables": zod.array(zod.object({
+  "name": zod.string().optional().describe('Variable name has to match one of component\'s variables'),
+  "value": zod.string().optional().describe('Value has to be convertible to the type specified in component variable')
+}).describe('Job component variable data')).optional()
+}).describe('Job component data')).optional()
+}).describe('Job components page')
 

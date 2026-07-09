@@ -37,12 +37,49 @@ export const deleteAccountVariableParams = zod.strictObject({
 })
 
 /**
+ * @summary Fetches the authenticated user's account data.
+ */
+export const getUserAccountResponse = zod.object({
+  "id": zod.number().optional(),
+  "name": zod.string().optional(),
+  "descriptor": zod.object({
+  "bilingEmail": zod.string().optional(),
+  "deviceLimit": zod.number().optional(),
+  "timeZone": zod.string().optional()
+}).optional().describe('Account description data'),
+  "uid": zod.string().optional(),
+  "currency": zod.string().optional(),
+  "devicesStatus": zod.object({
+  "numberOfDevices": zod.number().optional(),
+  "numberOfOnlineDevices": zod.number().optional(),
+  "numberOfOfflineDevices": zod.number().optional(),
+  "numberOfOnDemandDevices": zod.number().optional(),
+  "numberOfManagedDevices": zod.number().optional()
+}).optional().describe('Account Devices Status')
+}).describe('Account data')
+
+/**
  * @summary Fetches the account variables.
  */
 export const getAccountVariablesQueryParams = zod.strictObject({
   "page": zod.number().optional(),
   "max": zod.number().optional()
 })
+
+export const getAccountVariablesResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "variables": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "name": zod.string().optional(),
+  "value": zod.string().optional(),
+  "masked": zod.boolean().optional()
+}).describe('Variable data')).optional()
+}).describe('Variables page')
 
 /**
  * @summary Fetches the authentication users records of the authenticated user's account.
@@ -51,6 +88,26 @@ export const getUsersQueryParams = zod.strictObject({
   "page": zod.number().optional(),
   "max": zod.number().optional()
 })
+
+export const getUsersResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "users": zod.array(zod.object({
+  "lastName": zod.string().optional(),
+  "firstName": zod.string().optional(),
+  "username": zod.string().optional(),
+  "email": zod.string().optional(),
+  "telephone": zod.string().optional(),
+  "status": zod.string().optional(),
+  "created": zod.number().optional(),
+  "lastAccess": zod.number().optional(),
+  "disabled": zod.boolean().optional()
+}).describe('Authentication user data')).optional()
+}).describe('Users page')
 
 /**
  * @summary Fetches the site records of the authenticated user's account.
@@ -61,6 +118,40 @@ export const getSitesQueryParams = zod.strictObject({
   "siteName": zod.string().optional().describe('Optional. Filters results based on the provided value using the LIKE operator. Partial matches are allowed.')
 })
 
+export const getSitesResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "sites": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "uid": zod.string().optional().describe('Unique alphanumeric UID of this site'),
+  "accountUid": zod.string().optional().describe('Unique alphanumeric UID of the account to which this site belongs'),
+  "name": zod.string().optional(),
+  "description": zod.string().optional(),
+  "notes": zod.string().optional(),
+  "onDemand": zod.boolean().optional(),
+  "splashtopAutoInstall": zod.boolean().optional(),
+  "proxySettings": zod.object({
+  "host": zod.string().optional(),
+  "password": zod.string().optional(),
+  "port": zod.number().optional(),
+  "type": zod.enum(['http', 'socks4', 'socks5']).optional(),
+  "username": zod.string().optional()
+}).optional().describe('Site\'s Proxy Settings'),
+  "devicesStatus": zod.object({
+  "numberOfDevices": zod.number().optional(),
+  "numberOfOnlineDevices": zod.number().optional(),
+  "numberOfOfflineDevices": zod.number().optional()
+}).optional().describe('Devices Status'),
+  "autotaskCompanyName": zod.string().optional(),
+  "autotaskCompanyId": zod.string().optional(),
+  "portalUrl": zod.string().optional()
+}).describe('Site data')).optional()
+}).describe('Sites page')
+
 /**
  * @summary Fetches the sites records with its mapped dnet network id for the authenticated user's account.
  */
@@ -68,6 +159,24 @@ export const getDnetSiteMappingsQueryParams = zod.strictObject({
   "page": zod.number().optional(),
   "max": zod.number().optional()
 })
+
+export const getDnetSiteMappingsResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "dnetSiteMappings": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "uid": zod.string().optional().describe('Unique alphanumeric UID of this site'),
+  "accountUid": zod.string().optional().describe('Unique alphanumeric UID of the account to which this site belongs'),
+  "name": zod.string().optional(),
+  "description": zod.string().optional(),
+  "dattoNetworkingNetworkIds": zod.array(zod.number()).optional(),
+  "portalUrl": zod.string().optional()
+}).describe('Dnet site mappings data')).optional()
+}).describe('Dnet site mappings page')
 
 /**
  * @summary Fetches the devices of the authenticated user's account.
@@ -82,6 +191,364 @@ export const getUserAccountDevicesQueryParams = zod.strictObject({
   "siteName": zod.string().optional().describe('Optional. Filters results based on the provided value using the LIKE operator. Partial matches are allowed.')
 })
 
+export const getUserAccountDevicesResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "devices": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "uid": zod.string().optional(),
+  "siteId": zod.number().optional(),
+  "siteUid": zod.string().optional(),
+  "siteName": zod.string().optional(),
+  "deviceType": zod.object({
+  "category": zod.string().optional(),
+  "type": zod.string().optional()
+}).optional().describe('Devices Type'),
+  "hostname": zod.string().optional(),
+  "intIpAddress": zod.string().optional(),
+  "operatingSystem": zod.string().optional(),
+  "lastLoggedInUser": zod.string().optional(),
+  "domain": zod.string().optional(),
+  "cagVersion": zod.string().optional(),
+  "displayVersion": zod.string().optional(),
+  "extIpAddress": zod.string().optional(),
+  "description": zod.string().optional(),
+  "a64Bit": zod.boolean().optional(),
+  "rebootRequired": zod.boolean().optional(),
+  "online": zod.boolean().optional(),
+  "suspended": zod.boolean().optional(),
+  "deleted": zod.boolean().optional(),
+  "lastSeen": zod.number().optional(),
+  "lastReboot": zod.number().optional(),
+  "lastAuditDate": zod.number().optional(),
+  "creationDate": zod.number().optional(),
+  "udf": zod.object({
+  "udf1": zod.string().optional(),
+  "udf2": zod.string().optional(),
+  "udf3": zod.string().optional(),
+  "udf4": zod.string().optional(),
+  "udf5": zod.string().optional(),
+  "udf6": zod.string().optional(),
+  "udf7": zod.string().optional(),
+  "udf8": zod.string().optional(),
+  "udf9": zod.string().optional(),
+  "udf10": zod.string().optional(),
+  "udf11": zod.string().optional(),
+  "udf12": zod.string().optional(),
+  "udf13": zod.string().optional(),
+  "udf14": zod.string().optional(),
+  "udf15": zod.string().optional(),
+  "udf16": zod.string().optional(),
+  "udf17": zod.string().optional(),
+  "udf18": zod.string().optional(),
+  "udf19": zod.string().optional(),
+  "udf20": zod.string().optional(),
+  "udf21": zod.string().optional(),
+  "udf22": zod.string().optional(),
+  "udf23": zod.string().optional(),
+  "udf24": zod.string().optional(),
+  "udf25": zod.string().optional(),
+  "udf26": zod.string().optional(),
+  "udf27": zod.string().optional(),
+  "udf28": zod.string().optional(),
+  "udf29": zod.string().optional(),
+  "udf30": zod.string().optional(),
+  "udf31": zod.string().optional(),
+  "udf32": zod.string().optional(),
+  "udf33": zod.string().optional(),
+  "udf34": zod.string().optional(),
+  "udf35": zod.string().optional(),
+  "udf36": zod.string().optional(),
+  "udf37": zod.string().optional(),
+  "udf38": zod.string().optional(),
+  "udf39": zod.string().optional(),
+  "udf40": zod.string().optional(),
+  "udf41": zod.string().optional(),
+  "udf42": zod.string().optional(),
+  "udf43": zod.string().optional(),
+  "udf44": zod.string().optional(),
+  "udf45": zod.string().optional(),
+  "udf46": zod.string().optional(),
+  "udf47": zod.string().optional(),
+  "udf48": zod.string().optional(),
+  "udf49": zod.string().optional(),
+  "udf50": zod.string().optional(),
+  "udf51": zod.string().optional(),
+  "udf52": zod.string().optional(),
+  "udf53": zod.string().optional(),
+  "udf54": zod.string().optional(),
+  "udf55": zod.string().optional(),
+  "udf56": zod.string().optional(),
+  "udf57": zod.string().optional(),
+  "udf58": zod.string().optional(),
+  "udf59": zod.string().optional(),
+  "udf60": zod.string().optional(),
+  "udf61": zod.string().optional(),
+  "udf62": zod.string().optional(),
+  "udf63": zod.string().optional(),
+  "udf64": zod.string().optional(),
+  "udf65": zod.string().optional(),
+  "udf66": zod.string().optional(),
+  "udf67": zod.string().optional(),
+  "udf68": zod.string().optional(),
+  "udf69": zod.string().optional(),
+  "udf70": zod.string().optional(),
+  "udf71": zod.string().optional(),
+  "udf72": zod.string().optional(),
+  "udf73": zod.string().optional(),
+  "udf74": zod.string().optional(),
+  "udf75": zod.string().optional(),
+  "udf76": zod.string().optional(),
+  "udf77": zod.string().optional(),
+  "udf78": zod.string().optional(),
+  "udf79": zod.string().optional(),
+  "udf80": zod.string().optional(),
+  "udf81": zod.string().optional(),
+  "udf82": zod.string().optional(),
+  "udf83": zod.string().optional(),
+  "udf84": zod.string().optional(),
+  "udf85": zod.string().optional(),
+  "udf86": zod.string().optional(),
+  "udf87": zod.string().optional(),
+  "udf88": zod.string().optional(),
+  "udf89": zod.string().optional(),
+  "udf90": zod.string().optional(),
+  "udf91": zod.string().optional(),
+  "udf92": zod.string().optional(),
+  "udf93": zod.string().optional(),
+  "udf94": zod.string().optional(),
+  "udf95": zod.string().optional(),
+  "udf96": zod.string().optional(),
+  "udf97": zod.string().optional(),
+  "udf98": zod.string().optional(),
+  "udf99": zod.string().optional(),
+  "udf100": zod.string().optional(),
+  "udf101": zod.string().optional(),
+  "udf102": zod.string().optional(),
+  "udf103": zod.string().optional(),
+  "udf104": zod.string().optional(),
+  "udf105": zod.string().optional(),
+  "udf106": zod.string().optional(),
+  "udf107": zod.string().optional(),
+  "udf108": zod.string().optional(),
+  "udf109": zod.string().optional(),
+  "udf110": zod.string().optional(),
+  "udf111": zod.string().optional(),
+  "udf112": zod.string().optional(),
+  "udf113": zod.string().optional(),
+  "udf114": zod.string().optional(),
+  "udf115": zod.string().optional(),
+  "udf116": zod.string().optional(),
+  "udf117": zod.string().optional(),
+  "udf118": zod.string().optional(),
+  "udf119": zod.string().optional(),
+  "udf120": zod.string().optional(),
+  "udf121": zod.string().optional(),
+  "udf122": zod.string().optional(),
+  "udf123": zod.string().optional(),
+  "udf124": zod.string().optional(),
+  "udf125": zod.string().optional(),
+  "udf126": zod.string().optional(),
+  "udf127": zod.string().optional(),
+  "udf128": zod.string().optional(),
+  "udf129": zod.string().optional(),
+  "udf130": zod.string().optional(),
+  "udf131": zod.string().optional(),
+  "udf132": zod.string().optional(),
+  "udf133": zod.string().optional(),
+  "udf134": zod.string().optional(),
+  "udf135": zod.string().optional(),
+  "udf136": zod.string().optional(),
+  "udf137": zod.string().optional(),
+  "udf138": zod.string().optional(),
+  "udf139": zod.string().optional(),
+  "udf140": zod.string().optional(),
+  "udf141": zod.string().optional(),
+  "udf142": zod.string().optional(),
+  "udf143": zod.string().optional(),
+  "udf144": zod.string().optional(),
+  "udf145": zod.string().optional(),
+  "udf146": zod.string().optional(),
+  "udf147": zod.string().optional(),
+  "udf148": zod.string().optional(),
+  "udf149": zod.string().optional(),
+  "udf150": zod.string().optional(),
+  "udf151": zod.string().optional(),
+  "udf152": zod.string().optional(),
+  "udf153": zod.string().optional(),
+  "udf154": zod.string().optional(),
+  "udf155": zod.string().optional(),
+  "udf156": zod.string().optional(),
+  "udf157": zod.string().optional(),
+  "udf158": zod.string().optional(),
+  "udf159": zod.string().optional(),
+  "udf160": zod.string().optional(),
+  "udf161": zod.string().optional(),
+  "udf162": zod.string().optional(),
+  "udf163": zod.string().optional(),
+  "udf164": zod.string().optional(),
+  "udf165": zod.string().optional(),
+  "udf166": zod.string().optional(),
+  "udf167": zod.string().optional(),
+  "udf168": zod.string().optional(),
+  "udf169": zod.string().optional(),
+  "udf170": zod.string().optional(),
+  "udf171": zod.string().optional(),
+  "udf172": zod.string().optional(),
+  "udf173": zod.string().optional(),
+  "udf174": zod.string().optional(),
+  "udf175": zod.string().optional(),
+  "udf176": zod.string().optional(),
+  "udf177": zod.string().optional(),
+  "udf178": zod.string().optional(),
+  "udf179": zod.string().optional(),
+  "udf180": zod.string().optional(),
+  "udf181": zod.string().optional(),
+  "udf182": zod.string().optional(),
+  "udf183": zod.string().optional(),
+  "udf184": zod.string().optional(),
+  "udf185": zod.string().optional(),
+  "udf186": zod.string().optional(),
+  "udf187": zod.string().optional(),
+  "udf188": zod.string().optional(),
+  "udf189": zod.string().optional(),
+  "udf190": zod.string().optional(),
+  "udf191": zod.string().optional(),
+  "udf192": zod.string().optional(),
+  "udf193": zod.string().optional(),
+  "udf194": zod.string().optional(),
+  "udf195": zod.string().optional(),
+  "udf196": zod.string().optional(),
+  "udf197": zod.string().optional(),
+  "udf198": zod.string().optional(),
+  "udf199": zod.string().optional(),
+  "udf200": zod.string().optional(),
+  "udf201": zod.string().optional(),
+  "udf202": zod.string().optional(),
+  "udf203": zod.string().optional(),
+  "udf204": zod.string().optional(),
+  "udf205": zod.string().optional(),
+  "udf206": zod.string().optional(),
+  "udf207": zod.string().optional(),
+  "udf208": zod.string().optional(),
+  "udf209": zod.string().optional(),
+  "udf210": zod.string().optional(),
+  "udf211": zod.string().optional(),
+  "udf212": zod.string().optional(),
+  "udf213": zod.string().optional(),
+  "udf214": zod.string().optional(),
+  "udf215": zod.string().optional(),
+  "udf216": zod.string().optional(),
+  "udf217": zod.string().optional(),
+  "udf218": zod.string().optional(),
+  "udf219": zod.string().optional(),
+  "udf220": zod.string().optional(),
+  "udf221": zod.string().optional(),
+  "udf222": zod.string().optional(),
+  "udf223": zod.string().optional(),
+  "udf224": zod.string().optional(),
+  "udf225": zod.string().optional(),
+  "udf226": zod.string().optional(),
+  "udf227": zod.string().optional(),
+  "udf228": zod.string().optional(),
+  "udf229": zod.string().optional(),
+  "udf230": zod.string().optional(),
+  "udf231": zod.string().optional(),
+  "udf232": zod.string().optional(),
+  "udf233": zod.string().optional(),
+  "udf234": zod.string().optional(),
+  "udf235": zod.string().optional(),
+  "udf236": zod.string().optional(),
+  "udf237": zod.string().optional(),
+  "udf238": zod.string().optional(),
+  "udf239": zod.string().optional(),
+  "udf240": zod.string().optional(),
+  "udf241": zod.string().optional(),
+  "udf242": zod.string().optional(),
+  "udf243": zod.string().optional(),
+  "udf244": zod.string().optional(),
+  "udf245": zod.string().optional(),
+  "udf246": zod.string().optional(),
+  "udf247": zod.string().optional(),
+  "udf248": zod.string().optional(),
+  "udf249": zod.string().optional(),
+  "udf250": zod.string().optional(),
+  "udf251": zod.string().optional(),
+  "udf252": zod.string().optional(),
+  "udf253": zod.string().optional(),
+  "udf254": zod.string().optional(),
+  "udf255": zod.string().optional(),
+  "udf256": zod.string().optional(),
+  "udf257": zod.string().optional(),
+  "udf258": zod.string().optional(),
+  "udf259": zod.string().optional(),
+  "udf260": zod.string().optional(),
+  "udf261": zod.string().optional(),
+  "udf262": zod.string().optional(),
+  "udf263": zod.string().optional(),
+  "udf264": zod.string().optional(),
+  "udf265": zod.string().optional(),
+  "udf266": zod.string().optional(),
+  "udf267": zod.string().optional(),
+  "udf268": zod.string().optional(),
+  "udf269": zod.string().optional(),
+  "udf270": zod.string().optional(),
+  "udf271": zod.string().optional(),
+  "udf272": zod.string().optional(),
+  "udf273": zod.string().optional(),
+  "udf274": zod.string().optional(),
+  "udf275": zod.string().optional(),
+  "udf276": zod.string().optional(),
+  "udf277": zod.string().optional(),
+  "udf278": zod.string().optional(),
+  "udf279": zod.string().optional(),
+  "udf280": zod.string().optional(),
+  "udf281": zod.string().optional(),
+  "udf282": zod.string().optional(),
+  "udf283": zod.string().optional(),
+  "udf284": zod.string().optional(),
+  "udf285": zod.string().optional(),
+  "udf286": zod.string().optional(),
+  "udf287": zod.string().optional(),
+  "udf288": zod.string().optional(),
+  "udf289": zod.string().optional(),
+  "udf290": zod.string().optional(),
+  "udf291": zod.string().optional(),
+  "udf292": zod.string().optional(),
+  "udf293": zod.string().optional(),
+  "udf294": zod.string().optional(),
+  "udf295": zod.string().optional(),
+  "udf296": zod.string().optional(),
+  "udf297": zod.string().optional(),
+  "udf298": zod.string().optional(),
+  "udf299": zod.string().optional(),
+  "udf300": zod.string().optional()
+}).optional().describe('User defined fields'),
+  "snmpEnabled": zod.boolean().optional(),
+  "deviceClass": zod.enum(['device', 'printer', 'esxihost', 'rmmnetworkdevice', 'unknown']).optional(),
+  "portalUrl": zod.string().optional(),
+  "warrantyDate": zod.string().optional(),
+  "antivirus": zod.object({
+  "antivirusProduct": zod.string().optional(),
+  "antivirusStatus": zod.enum(['RunningAndUpToDate', 'RunningAndNotUpToDate', 'NotRunning', 'NotDetected']).optional()
+}).optional().describe('Device antivirus data'),
+  "patchManagement": zod.object({
+  "patchStatus": zod.enum(['NoPolicy', 'NoData', 'RebootRequired', 'InstallError', 'ApprovedPending', 'FullyPatched']).optional(),
+  "patchesApprovedPending": zod.number().optional(),
+  "patchesNotApproved": zod.number().optional(),
+  "patchesInstalled": zod.number().optional()
+}).optional().describe('Patch management data'),
+  "softwareStatus": zod.string().optional(),
+  "webRemoteUrl": zod.string().optional(),
+  "networkProbe": zod.boolean().optional(),
+  "onboardedViaNetworkMonitor": zod.boolean().optional()
+}).describe('Device data')).optional()
+}).describe('Devices page')
+
 /**
  * @summary Fetches the components records of the authenticated user's account.
  */
@@ -89,6 +556,31 @@ export const getComponentsQueryParams = zod.strictObject({
   "page": zod.number().optional(),
   "max": zod.number().optional()
 })
+
+export const getComponentsResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "components": zod.array(zod.object({
+  "id": zod.number().optional(),
+  "credentialsRequired": zod.boolean().optional(),
+  "uid": zod.string().optional(),
+  "name": zod.string().optional(),
+  "description": zod.string().optional(),
+  "categoryCode": zod.string().optional(),
+  "variables": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "defaultVal": zod.string().optional(),
+  "type": zod.string().optional(),
+  "direction": zod.boolean().optional(),
+  "description": zod.string().optional(),
+  "variablesIdx": zod.number().optional()
+}).describe('Component\'s variables data')).optional()
+}).describe('Component data')).optional()
+}).describe('Components page')
 
 /**
  * If the muted parameter is not provided, both muted and umuted alerts will be queried.
@@ -100,6 +592,47 @@ export const getUserAccountClosedAlertsQueryParams = zod.strictObject({
   "muted": zod.boolean().optional()
 })
 
+export const getUserAccountClosedAlertsResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "alerts": zod.array(zod.object({
+  "alertUid": zod.string().optional(),
+  "priority": zod.enum(['Critical', 'High', 'Moderate', 'Low', 'Information', 'Unknown']).optional(),
+  "diagnostics": zod.string().optional(),
+  "resolved": zod.boolean().optional(),
+  "resolvedBy": zod.string().optional(),
+  "resolvedOn": zod.number().optional(),
+  "muted": zod.boolean().optional(),
+  "ticketNumber": zod.string().optional(),
+  "timestamp": zod.number().optional(),
+  "alertMonitorInfo": zod.object({
+  "sendsEmails": zod.boolean().optional(),
+  "createsTicket": zod.boolean().optional()
+}).optional().describe('Alert monitor information'),
+  "alertContext": zod.object({
+  "@class": zod.string().optional()
+}).optional().describe('Alert context; polymorphic on the wire\'s Jackson \'@class\' discriminator. The spec\'s generated \*Context schemas do not model the real property sets, so this is a permissive open object rather than a oneOf.'),
+  "alertSourceInfo": zod.object({
+  "deviceUid": zod.string().optional(),
+  "deviceName": zod.string().optional(),
+  "siteUid": zod.string().optional(),
+  "siteName": zod.string().optional()
+}).optional().describe('Alert source information data'),
+  "responseActions": zod.array(zod.object({
+  "actionTime": zod.iso.datetime({}).optional(),
+  "actionType": zod.enum(['EMAIL_SENT', 'EMAIL_SEND_ERROR', 'TICKET_PENDING', 'TICKET_CREATED', 'TICKET_CREATION_ERROR', 'TICKET_CLOSED_CALL', 'COMPONENT', 'WEBHOOK_EXECUTED', 'WEBHOOK_EXECUTION_ERROR']).optional(),
+  "description": zod.string().optional(),
+  "actionReference": zod.string().optional(),
+  "actionReferenceInt": zod.string().optional()
+})).optional(),
+  "autoresolveMins": zod.number().optional()
+}).describe('Alert data')).optional()
+}).describe('Alerts page')
+
 /**
  * If the muted parameter is not provided, both muted and umuted alerts will be queried.
  * @summary Fetches open alerts of the authenticated user's account.
@@ -109,4 +642,45 @@ export const getUserAccountOpenAlertsQueryParams = zod.strictObject({
   "max": zod.number().optional(),
   "muted": zod.boolean().optional()
 })
+
+export const getUserAccountOpenAlertsResponse = zod.object({
+  "pageDetails": zod.object({
+  "count": zod.number().optional(),
+  "totalCount": zod.number().optional(),
+  "prevPageUrl": zod.string().optional(),
+  "nextPageUrl": zod.string().optional()
+}).optional().describe('Pagination data'),
+  "alerts": zod.array(zod.object({
+  "alertUid": zod.string().optional(),
+  "priority": zod.enum(['Critical', 'High', 'Moderate', 'Low', 'Information', 'Unknown']).optional(),
+  "diagnostics": zod.string().optional(),
+  "resolved": zod.boolean().optional(),
+  "resolvedBy": zod.string().optional(),
+  "resolvedOn": zod.number().optional(),
+  "muted": zod.boolean().optional(),
+  "ticketNumber": zod.string().optional(),
+  "timestamp": zod.number().optional(),
+  "alertMonitorInfo": zod.object({
+  "sendsEmails": zod.boolean().optional(),
+  "createsTicket": zod.boolean().optional()
+}).optional().describe('Alert monitor information'),
+  "alertContext": zod.object({
+  "@class": zod.string().optional()
+}).optional().describe('Alert context; polymorphic on the wire\'s Jackson \'@class\' discriminator. The spec\'s generated \*Context schemas do not model the real property sets, so this is a permissive open object rather than a oneOf.'),
+  "alertSourceInfo": zod.object({
+  "deviceUid": zod.string().optional(),
+  "deviceName": zod.string().optional(),
+  "siteUid": zod.string().optional(),
+  "siteName": zod.string().optional()
+}).optional().describe('Alert source information data'),
+  "responseActions": zod.array(zod.object({
+  "actionTime": zod.iso.datetime({}).optional(),
+  "actionType": zod.enum(['EMAIL_SENT', 'EMAIL_SEND_ERROR', 'TICKET_PENDING', 'TICKET_CREATED', 'TICKET_CREATION_ERROR', 'TICKET_CLOSED_CALL', 'COMPONENT', 'WEBHOOK_EXECUTED', 'WEBHOOK_EXECUTION_ERROR']).optional(),
+  "description": zod.string().optional(),
+  "actionReference": zod.string().optional(),
+  "actionReferenceInt": zod.string().optional()
+})).optional(),
+  "autoresolveMins": zod.number().optional()
+}).describe('Alert data')).optional()
+}).describe('Alerts page')
 
