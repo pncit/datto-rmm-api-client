@@ -18,7 +18,7 @@ import { narrow } from "./narrow";
 /** `GET /api/v2/job/{uid}/components`'s item schema (`JobComponent`, with its nested
  * `JobComponentVariable[]`). No UDF/alertContext/enum defect to reconcile — a plain mirror of
  * the generated shape, scoped to this resource file since nothing else in this phase shares it. */
-const jobComponentSchema = z.object({
+export const jobComponentSchema = z.object({
   uid: z.string().optional(),
   name: z.string().optional(),
   variables: z

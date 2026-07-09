@@ -12,6 +12,7 @@ import {
 import {
   createBody as createSiteBody,
   createSiteVariableBody,
+  updateBody as updateSiteBody,
   updateProxyBody,
   updateSiteVariableBody,
 } from "../generated/schemas/-v2-site/-v2-site.zod";
@@ -29,28 +30,18 @@ import {
  * regeneration.
  *
  * **Every body-carrying write operation named by a Phase 5 `WriteOpKey` is reconciled here**
- * (verified directly against `spec/openapi.json`): two (`site-create`, `device-job-create`) already
- * carry their genuinely-required fields from the spec's own component `required` array — the
- * generator already emits them as non-optional, so no wrapper is needed for those, and they are
- * re-exported here (unchanged) so this module remains the single place a reader checks for "what
- * does this write body actually require." The remaining seven (including `device-udf-set` above),
- * whose components declare no `required` array at all, get a hand-verified wrapper: the two
- * variable-*create* bodies require `name` (a variable cannot be meaningfully created without one —
- * spec's own field description: "Variable name"); the two variable-*update* bodies, the
- * proxy-settings body, and the warranty body require *some* field be present (the same "reject an
- * all-omitted body" judgment already applied to `device-udf-set`, since which single field is "the"
- * required one is genuinely ambiguous for an update/settings body where any subset of fields may be
- * changed).
- *
- * **Known gap, out of this module's scope to fix:** the spec also declares a body-carrying
- * `POST /api/v2/site/{siteUid}` ("Updates the site...", body `SiteRequest` — the generated
- * `updateBody`, whose `name` field is already spec-required) with **no corresponding key at all** in
- * Phase 5's `WriteOpKey` union (`src/rate-limit/rate-limits.ts`) — the inverse of that same file's
- * already-flagged `filter-create`/`filter-delete` dead entries (a real write op with no key, rather
- * than a key with no real op). `BaseResource`'s write primitives require a `WriteOpKey` argument, so
- * a `SiteResource.update()` method (Phase 7) cannot be implemented until Phase 5's table gains a key
- * for it (e.g. `'site-update'`) — this module cannot add one on its own without editing that
- * untouched Phase 5 file, which is out of scope here.
+ * (verified directly against `spec/openapi.json`): three (`site-create`, `site-update`,
+ * `device-job-create`) already carry their genuinely-required fields from the spec's own component
+ * `required` array — the generator already emits them as non-optional, so no wrapper is needed for
+ * those, and they are re-exported here (unchanged) so this module remains the single place a reader
+ * checks for "what does this write body actually require." The remaining seven (including
+ * `device-udf-set` above), whose components declare no `required` array at all, get a
+ * hand-verified wrapper: the two variable-*create* bodies require `name` (a variable cannot be
+ * meaningfully created without one — spec's own field description: "Variable name"); the two
+ * variable-*update* bodies, the proxy-settings body, and the warranty body require *some* field be
+ * present (the same "reject an all-omitted body" judgment already applied to `device-udf-set`,
+ * since which single field is "the" required one is genuinely ambiguous for an update/settings
+ * body where any subset of fields may be changed).
  */
 
 /**
@@ -76,6 +67,14 @@ function requireSomeField<T extends z.ZodType<Record<string, unknown>>>(
  * checkable from this one module.
  */
 export const siteCreateBodySchema = createSiteBody;
+
+/**
+ * `POST /api/v2/site/{siteUid}`'s body (`site-update`): the spec's own `SiteRequest` component
+ * declares `required: ["name"]`, and the generator already emits `name` as non-optional
+ * (`updateSiteBody`) — no additional wrapper is needed. Re-exported here (unchanged) for the same
+ * discoverability reason as {@link siteCreateBodySchema}.
+ */
+export const siteUpdateBodySchema = updateSiteBody;
 
 /**
  * `PUT /api/v2/device/{deviceUid}/quickjob`'s body (`device-job-create`): the spec's own

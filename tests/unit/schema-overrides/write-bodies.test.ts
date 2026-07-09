@@ -5,6 +5,7 @@ import {
   createSiteVariableWriteBodySchema,
   deviceJobCreateBodySchema,
   siteCreateBodySchema,
+  siteUpdateBodySchema,
   udfWriteBodySchema,
   updateAccountVariableWriteBodySchema,
   updateProxyWriteBodySchema,
@@ -43,6 +44,26 @@ describe("siteCreateBodySchema (device-job-create's sibling: already spec-requir
   it("rejects an unknown key (the generated body is a strict object)", () => {
     const result = siteCreateBodySchema.safeParse({
       name: "New Site",
+      notASiteField: "value",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("siteUpdateBodySchema (already spec-required)", () => {
+  it("accepts a body with only the spec-required `name`", () => {
+    const result = siteUpdateBodySchema.safeParse({ name: "Renamed Site" });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a body missing `name` (spec's own required array, not this module)", () => {
+    const result = siteUpdateBodySchema.safeParse({ description: "no name" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an unknown key (the generated body is a strict object)", () => {
+    const result = siteUpdateBodySchema.safeParse({
+      name: "Renamed Site",
       notASiteField: "value",
     });
     expect(result.success).toBe(false);

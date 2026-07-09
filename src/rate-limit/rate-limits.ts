@@ -24,6 +24,7 @@
 export const WRITE_LIMITS = {
   "device-udf-set": 600,
   "site-create": 100,
+  "site-update": 100,
   "site-variable-set": 100,
   "account-variable-set": 100,
   "alert-resolve": 100,

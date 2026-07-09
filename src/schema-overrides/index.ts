@@ -26,6 +26,7 @@ export {
   warrantyWriteBodySchema,
   type DeviceWarrantyInput,
   siteCreateBodySchema,
+  siteUpdateBodySchema,
   deviceJobCreateBodySchema,
   createSiteVariableWriteBodySchema,
   type SiteVariableCreateInput,

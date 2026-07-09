@@ -1,6 +1,6 @@
 import { createQuickJobResponse } from "../../generated/schemas/-v2-device/-v2-device.zod";
+import type { CreateQuickJobRequest } from "../../generated/types/createQuickJobRequest";
 import type { CreateQuickJobResponse } from "../../generated/types/createQuickJobResponse";
-import type { JobComponentRequest } from "../../generated/types/jobComponentRequest";
 import {
   deviceJobCreateBodySchema,
   deviceSchema,
@@ -86,7 +86,7 @@ export class DeviceResource extends BaseResource {
    * device. */
   async createJob(
     uid: string,
-    body: { jobName: string; jobComponent: JobComponentRequest },
+    body: CreateQuickJobRequest,
   ): Promise<CreateQuickJobResponse> {
     const result = await this.httpPut(
       `/api/v2/device/${uid}/quickjob`,

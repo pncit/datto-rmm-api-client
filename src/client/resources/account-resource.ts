@@ -1,8 +1,10 @@
 import { z } from "zod";
 
+import { getUserAccountResponse } from "../../generated/schemas/-v2-account/-v2-account.zod";
 import type { Account } from "../../generated/types/account";
 import type { Component } from "../../generated/types/component";
 import type { DnetSiteMappingsDto } from "../../generated/types/dnetSiteMappingsDto";
+import type { GetAccountVariablesParams } from "../../generated/types/getAccountVariablesParams";
 import type { GetComponentsParams } from "../../generated/types/getComponentsParams";
 import type { GetDnetSiteMappingsParams } from "../../generated/types/getDnetSiteMappingsParams";
 import type { GetUserAccountDevicesParams } from "../../generated/types/getUserAccountDevicesParams";
@@ -21,37 +23,11 @@ import { narrow } from "./narrow";
 import { variableSchema } from "./variable-schema";
 import { voidResponseSchema } from "./void-response";
 
-/** `GET /api/v2/account`'s response schema. `Account` carries no UDF/alertContext/enum defect
- * this client reconciles, so this is a plain mirror of the generated shape — no override
- * needed, matching the generated `Account` type field-for-field. */
-const accountSchema = z.object({
-  id: z.number().optional(),
-  name: z.string().optional(),
-  descriptor: z
-    .object({
-      bilingEmail: z.string().optional(),
-      deviceLimit: z.number().optional(),
-      timeZone: z.string().optional(),
-    })
-    .optional(),
-  uid: z.string().optional(),
-  currency: z.string().optional(),
-  devicesStatus: z
-    .object({
-      numberOfDevices: z.number().optional(),
-      numberOfOnlineDevices: z.number().optional(),
-      numberOfOfflineDevices: z.number().optional(),
-      numberOfOnDemandDevices: z.number().optional(),
-      numberOfManagedDevices: z.number().optional(),
-    })
-    .optional(),
-});
-
 /** `GET /api/v2/account/components`'s item schema (`Component`, with its nested
  * `ComponentVariable[]`). No UDF/alertContext/enum defect to reconcile — a plain mirror of the
  * generated shape, scoped to this resource file since (unlike `Variable`) no other Phase 7
  * resource shares it. */
-const componentSchema = z.object({
+export const componentSchema = z.object({
   id: z.number().optional(),
   credentialsRequired: z.boolean().optional(),
   uid: z.string().optional(),
@@ -74,7 +50,7 @@ const componentSchema = z.object({
 
 /** `GET /api/v2/account/dnet-site-mappings`'s item schema (`DnetSiteMappingsDto`). Scoped to
  * this resource file — not shared elsewhere in this phase. */
-const dnetSiteMappingSchema = z.object({
+export const dnetSiteMappingSchema = z.object({
   id: z.number().optional(),
   uid: z.string().optional(),
   accountUid: z.string().optional(),
@@ -110,7 +86,7 @@ export class AccountResource extends BaseResource {
   async get(): Promise<Account> {
     const result = await this.httpGet(
       "/api/v2/account",
-      accountSchema,
+      getUserAccountResponse,
       "GET /account",
     );
     return narrow<Account>(result);
@@ -133,10 +109,7 @@ export class AccountResource extends BaseResource {
   }
 
   /** `GET /api/v2/account/variables` — account-scoped variables, fully paginated. */
-  async variables(params?: {
-    page?: number;
-    max?: number;
-  }): Promise<Variable[]> {
+  async variables(params?: GetAccountVariablesParams): Promise<Variable[]> {
     const result = await this.paginate(
       "/api/v2/account/variables",
       "variables",

@@ -11,8 +11,10 @@ import type { Filter } from "../../generated/types/filter";
 import type { GetSiteDeviceFiltersParams } from "../../generated/types/getSiteDeviceFiltersParams";
 import type { GetSiteDevicesParams } from "../../generated/types/getSiteDevicesParams";
 import type { GetSiteDevicesWithNetworkInterfaceParams } from "../../generated/types/getSiteDevicesWithNetworkInterfaceParams";
+import type { GetSiteVariablesParams } from "../../generated/types/getSiteVariablesParams";
 import type { GetSitesParams } from "../../generated/types/getSitesParams";
 import type { Site } from "../../generated/types/site";
+import type { SiteRequest } from "../../generated/types/siteRequest";
 import type { SiteSettings } from "../../generated/types/siteSettings";
 import type { Variable } from "../../generated/types/variable";
 import {
@@ -22,6 +24,7 @@ import {
   type SiteVariableUpdateInput,
   createSiteVariableWriteBodySchema,
   siteCreateBodySchema,
+  siteUpdateBodySchema,
   updateProxyWriteBodySchema,
   updateSiteVariableWriteBodySchema,
 } from "../../schema-overrides";
@@ -39,7 +42,7 @@ import { voidResponseSchema } from "./void-response";
  * data). No UDF/alertContext/enum defect of its own to reconcile — a plain mirror of the
  * generated shape, scoped to this resource file since nothing else in this phase shares it.
  */
-const deviceNetworkInterfaceSchema = z.object({
+export const deviceNetworkInterfaceSchema = z.object({
   id: z.number().optional(),
   uid: z.string().optional(),
   siteId: z.number().optional(),
@@ -72,7 +75,7 @@ const deviceNetworkInterfaceSchema = z.object({
  * is needed for it to widen at runtime — `parseLenient`'s enum degradation (Phase 4) applies to
  * every enum node this client validates, independent of whether the entity is otherwise
  * reconciled in `schema-overrides/`. */
-const filterSchema = z.object({
+export const filterSchema = z.object({
   id: z.number().optional(),
   name: z.string().optional(),
   description: z.string().optional(),
@@ -92,16 +95,6 @@ const filterSchema = z.object({
  * Datto's own `-v2-account.zod.ts` tag) rather than `AccountResource` — the plan's own "site
  * list/get" phrasing pins the collection to this namespace (see `account-resource.ts`'s doc for
  * why this differs from `account.devices()`, which design Decision 5 pins by name instead).
- *
- * **`update()` (`POST /api/v2/site/{siteUid}`) is a known, documented gap, not an oversight.**
- * The spec declares this real write operation, but Phase 5's `WRITE_LIMITS` table
- * (`src/rate-limit/rate-limits.ts`) has no corresponding `WriteOpKey` for it — `write-bodies.ts`
- * flagged this exact gap during Phase 6 ("a real write op with no key … out of this module's
- * scope to fix … cannot be implemented until Phase 5's table gains a key for it"). `BaseResource`
- * write primitives require a typed `WriteOpKey`, so implementing `update()` here would require
- * editing the untouched Phase 5 table — out of this phase's scope per the plan's scope-discipline
- * rule. Left for a maintainer/reviewer to add a `'site-update'` key to `WRITE_LIMITS` before this
- * method can be added.
  *
  * **`deleteVariable()`/`deleteProxy()` reuse an existing `WriteOpKey`** (`site-variable-set` /
  * `device-proxy-set` respectively) rather than a dedicated delete-specific key — Phase 6's
@@ -146,6 +139,21 @@ export class SiteResource extends BaseResource {
     return narrow<Site>(result);
   }
 
+  /** `POST /api/v2/site/{siteUid}` (`site-update`): updates the site identified by `siteUid`. The
+   * response is the same `Site` shape `get()`/`create()` validate — reused directly rather than
+   * hand-mirrored (`updateResponse`/`getSiteResponse` are the identical generated shape). */
+  async update(siteUid: string, body: SiteRequest): Promise<Site> {
+    const result = await this.httpPost(
+      `/api/v2/site/${siteUid}`,
+      body,
+      siteUpdateBodySchema,
+      getSiteResponse,
+      "POST /site/{siteUid}",
+      "site-update",
+    );
+    return narrow<Site>(result);
+  }
+
   /** `GET /api/v2/site/{siteUid}/devices` — the site's devices, fully paginated. Reuses the
    * reconciled `deviceSchema` (design "Schema-override module": "Every other Device-shaped
    * response … is structurally the same Device entity, so this one reconciled schema is reused
@@ -184,7 +192,7 @@ export class SiteResource extends BaseResource {
   /** `GET /api/v2/site/{siteUid}/variables` — the site's variables, fully paginated. */
   async variables(
     siteUid: string,
-    params?: { page?: number; max?: number },
+    params?: GetSiteVariablesParams,
   ): Promise<Variable[]> {
     const result = await this.paginate(
       `/api/v2/site/${siteUid}/variables`,

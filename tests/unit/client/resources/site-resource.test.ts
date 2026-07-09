@@ -14,6 +14,7 @@ import { SiteResource } from "@/client/resources/site-resource";
 import type { DattoLogger } from "@/logging/logger";
 import type { RateDescriptor } from "@/rate-limit/rate-limiter";
 import type { CreateSiteRequest } from "@/generated/types/createSiteRequest";
+import type { SiteRequest } from "@/generated/types/siteRequest";
 
 const BASE_URL = "https://zinfandel-api.example.com";
 
@@ -102,6 +103,26 @@ describe("SiteResource", () => {
       resource2.create({
         description: "no name",
       } as unknown as CreateSiteRequest),
+    ).rejects.toMatchObject({ name: "DattoValidationError", stage: "request" });
+  });
+
+  it("update() POSTs /api/v2/site/{siteUid}, tags site-update, and rejects a malformed body", async () => {
+    const scope = nock(BASE_URL)
+      .post("/api/v2/site/site-1", { name: "Renamed HQ" })
+      .reply(200, { uid: "site-1", name: "Renamed HQ" });
+    const { resource, descriptors } = makeResource();
+
+    const result = await resource.update("site-1", { name: "Renamed HQ" });
+
+    expect(result).toEqual({ uid: "site-1", name: "Renamed HQ" });
+    expect(descriptors).toEqual([{ kind: "write", opKey: "site-update" }]);
+    expect(scope.isDone()).toBe(true);
+
+    const { resource: resource2 } = makeResource();
+    await expect(
+      resource2.update("site-1", {
+        description: "no name",
+      } as unknown as SiteRequest),
     ).rejects.toMatchObject({ name: "DattoValidationError", stage: "request" });
   });
 
