@@ -49,10 +49,12 @@ jobs:
           cache-dependency-path: |
             package-lock.json
 
-      # OIDC trusted publishing requires a recent npm (>= 11.5.1). Pin to latest
-      # so the runner's bundled npm can't fall behind the OIDC handshake.
+      # OIDC trusted publishing requires npm >= 11.5.1. Pin to npm@11 (latest
+      # stable v11.x) rather than @latest: npm v12 introduced a regression where
+      # sigstore is absent from libnpmpublish, causing `npm publish --provenance`
+      # to fail with MODULE_NOT_FOUND (https://github.com/npm/cli/issues/9722).
       - name: Update npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: Install dependencies
         run: npm ci
