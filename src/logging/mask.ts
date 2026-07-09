@@ -45,41 +45,82 @@ function isPlainObject(value: object): boolean {
 }
 
 /**
+ * Sentinel returned in place of an object that is its own ancestor in the value being
+ * walked, so `scrub`'s recursion terminates instead of overflowing the call stack.
+ */
+const CIRCULAR_PLACEHOLDER = "[circular]";
+
+/**
  * Recursively walks a log call's `meta` object, replacing every non-null value under
  * a `udf<N>` key — at any nesting depth, including inside a nested `udf` record — with
  * a redacted placeholder. Null/absent UDF values and all non-UDF structure pass through
  * unchanged. Recursion is restricted to arrays and plain objects (see
  * {@link isPlainObject}); any other object (`Date`, `Error`, `Map`, a class instance,
  * …) is returned as-is rather than flattened.
+ *
+ * `seen` tracks the current recursion's live ancestors (added on entry, removed on
+ * exit) so a circular reference — a routine shape for a logged request/response object
+ * (`req.parent === req`, or a parent/child back-reference) — resolves to
+ * {@link CIRCULAR_PLACEHOLDER} instead of recursing forever and crashing the log call
+ * with a `RangeError`. Because entries are removed on exit, the same object reached via
+ * two independent (non-circular) branches is still walked in each — only a genuine
+ * ancestor cycle is short-circuited.
  */
-function scrub(value: unknown): unknown {
+function scrub(value: unknown, seen: Set<object>): unknown {
   if (Array.isArray(value)) {
-    return value.map(scrub);
+    if (seen.has(value)) {
+      return CIRCULAR_PLACEHOLDER;
+    }
+    seen.add(value);
+    try {
+      return value.map((item) => scrub(item, seen));
+    } finally {
+      seen.delete(value);
+    }
   }
   if (value !== null && typeof value === "object" && isPlainObject(value)) {
-    return scrubMeta(value as Record<string, unknown>);
+    if (seen.has(value)) {
+      return CIRCULAR_PLACEHOLDER;
+    }
+    seen.add(value);
+    try {
+      return scrubEntries(value as Record<string, unknown>, seen);
+    } finally {
+      seen.delete(value);
+    }
   }
   return value;
 }
 
 /**
- * Scrubs a plain record's top-level entries (redacting UDF keys, recursing into
- * non-UDF ones via {@link scrub}). This is the typed entry point `withUdfMasking` uses
- * to cross out of `scrub`'s `unknown -> unknown` signature: a `DattoLogger` call's
- * `meta` is always a `Record<string, unknown>` (never an array — see `DattoLogger`'s
- * parameter type), so this function's real `Record -> Record` return type asserts the
- * boundary correctly instead of relying on a cast that a future edit to `scrub` could
- * silently invalidate.
+ * Scrubs a plain record's entries (redacting UDF keys, recursing into non-UDF ones via
+ * {@link scrub}), threading the shared cycle-detection `seen` set through the walk.
  */
-function scrubMeta(meta: Record<string, unknown>): Record<string, unknown> {
+function scrubEntries(
+  meta: Record<string, unknown>,
+  seen: Set<object>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, entryValue] of Object.entries(meta)) {
     out[key] =
       UDF_KEY.test(key) && entryValue != null
         ? mask(entryValue)
-        : scrub(entryValue);
+        : scrub(entryValue, seen);
   }
   return out;
+}
+
+/**
+ * Scrubs a log call's top-level `meta` record. This is the typed entry point
+ * `withUdfMasking` uses to cross out of `scrub`'s `unknown -> unknown` signature: a
+ * `DattoLogger` call's `meta` is always a `Record<string, unknown>` (never an array —
+ * see `DattoLogger`'s parameter type), so this function's real `Record -> Record`
+ * return type asserts the boundary correctly instead of relying on a cast that a future
+ * edit to `scrub` could silently invalidate. Starts a fresh cycle-detection `seen` set
+ * per top-level call.
+ */
+function scrubMeta(meta: Record<string, unknown>): Record<string, unknown> {
+  return scrubEntries(meta, new Set<object>());
 }
 
 /**
@@ -88,17 +129,28 @@ function scrubMeta(meta: Record<string, unknown>): Record<string, unknown> {
  *
  * This is the client's single logging boundary: `DattoRmmClient` constructs
  * `withUdfMasking(config.logger ?? consoleLogger)` once and threads the wrapped logger
- * through every layer, so no call site — current or future — can leak an unmasked UDF
- * value. The guarantee holds only because every wire-derived log value is carried in
- * `meta`; this decorator scrubs `meta`, never the message string, so a call site that
- * interpolated a wire value into the message text would bypass it. Call sites must
- * pass wire-derived values through `meta`, never format them into the message.
+ * through every layer. Two conditions bound what this guarantees:
+ * - **Only `meta` is scrubbed, never the message string.** A call site that
+ *   interpolated a wire value into the message text would bypass it, so call sites
+ *   must pass wire-derived values through `meta`, never format them into the message.
+ * - **Only plain-object/array structure inside `meta` is walked.** A value embedded
+ *   inside a non-plain object — a `Date`, `Map`, `Error`, or any other class instance —
+ *   is returned by {@link scrub} unmasked (see {@link isPlainObject}); this is
+ *   deliberate (rebuilding a non-plain object from its own-enumerable keys would
+ *   silently destroy it), but it means a raw wire payload placed inside such an object
+ *   is **not** scrubbed. Concretely: `DattoApiError#response` (`src/errors/datto-api-error.ts`)
+ *   holds the raw response body, so logging `{ err }` where `err` is a caught
+ *   `DattoApiError` does **not** redact any UDF value nested in `err.response` — call
+ *   sites must not place a raw wire payload inside `meta` under the assumption it will
+ *   be scrubbed; extract only the fields actually needed and pass those as plain data.
  */
 export function withUdfMasking(logger: DattoLogger): DattoLogger {
   const wrap =
     (method: "debug" | "info" | "warn" | "error"): DattoLogger[typeof method] =>
     (message, meta) =>
-      logger[method](message, meta ? scrubMeta(meta) : meta);
+      meta === undefined
+        ? logger[method](message)
+        : logger[method](message, scrubMeta(meta));
 
   return {
     debug: wrap("debug"),

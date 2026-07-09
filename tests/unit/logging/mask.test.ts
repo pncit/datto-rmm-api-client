@@ -54,7 +54,22 @@ describe("withUdfMasking", () => {
 
     masked.warn("no meta here");
 
-    expect(sink).toHaveBeenCalledWith("no meta here", undefined);
+    expect(sink).toHaveBeenCalledWith("no meta here");
+    expect(sink.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("forwards a no-meta call to the real console-backed default logger as a single argument", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const masked = withUdfMasking(console);
+
+      masked.info("no meta here");
+
+      expect(info).toHaveBeenCalledTimes(1);
+      expect(info.mock.calls[0]).toEqual(["no meta here"]);
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("wraps all four log levels independently", () => {
@@ -142,6 +157,52 @@ describe("withUdfMasking", () => {
     expect(instance.calls).toEqual([
       ["[test] device audit", { udf1: "[redacted - 6 characters]" }],
     ]);
+  });
+
+  it("does not throw or overflow the stack on a circular non-UDF plain object", () => {
+    const { logger, sink } = makeSink();
+    const masked = withUdfMasking(logger);
+    const req: Record<string, unknown> = { id: "req-1" };
+    req.self = req;
+
+    expect(() =>
+      masked.info("device audit", { req, udf1: "secret" }),
+    ).not.toThrow();
+
+    expect(sink).toHaveBeenCalledTimes(1);
+    const [, meta] = sink.mock.calls[0] as [string, Record<string, unknown>];
+    const scrubbedReq = meta.req as Record<string, unknown>;
+    expect(scrubbedReq.id).toBe("req-1");
+    expect(scrubbedReq.self).toBe("[circular]");
+    expect(meta.udf1).toBe("[redacted - 6 characters]");
+  });
+
+  it("does not throw on a circular array reachable from meta", () => {
+    const { logger, sink } = makeSink();
+    const masked = withUdfMasking(logger);
+    const items: unknown[] = ["a"];
+    items.push(items);
+
+    expect(() => masked.info("devices", { items })).not.toThrow();
+
+    expect(sink).toHaveBeenCalledTimes(1);
+    const [, meta] = sink.mock.calls[0] as [string, Record<string, unknown>];
+    const scrubbedItems = meta.items as unknown[];
+    expect(scrubbedItems[0]).toBe("a");
+    expect(scrubbedItems[1]).toBe("[circular]");
+  });
+
+  it("walks a shared (non-circular) object reached via two independent branches", () => {
+    const { logger, sink } = makeSink();
+    const masked = withUdfMasking(logger);
+    const shared = { udf1: "secret" };
+
+    masked.info("shared", { a: shared, b: shared });
+
+    expect(sink).toHaveBeenCalledTimes(1);
+    const [, meta] = sink.mock.calls[0] as [string, Record<string, unknown>];
+    expect(meta.a).toEqual({ udf1: "[redacted - 6 characters]" });
+    expect(meta.b).toEqual({ udf1: "[redacted - 6 characters]" });
   });
 
   it("never throws on a udf value JSON.stringify cannot serialize", () => {
