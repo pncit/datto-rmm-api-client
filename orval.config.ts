@@ -1,6 +1,6 @@
-import path from 'node:path';
+import path from "node:path";
 
-import { defineConfig } from 'orval';
+import { defineConfig } from "orval";
 
 /**
  * Orval configuration for Datto RMM API, Datto RMM v10.8.0.
@@ -27,25 +27,27 @@ import { defineConfig } from 'orval';
  * scripts/patch-spec.mjs from the committed spec/openapi.json (Phase 2). Overridable via
  * DATTO_OPENAPI_SPEC for local experimentation.
  */
-const spec = process.env.DATTO_OPENAPI_SPEC ?? path.resolve(__dirname, './spec/openapi.patched.json');
+const spec =
+  process.env.DATTO_OPENAPI_SPEC ??
+  path.resolve(__dirname, "./spec/openapi.patched.json");
 
 export default defineConfig({
   datto: {
     input: { target: spec },
     output: {
-      mode: 'tags-split',
-      target: './src/generated/endpoints/api.ts',
-      schemas: './src/generated/types',
-      client: 'axios',
+      mode: "tags-split",
+      target: "./src/generated/endpoints/api.ts",
+      schemas: "./src/generated/types",
+      client: "axios",
     },
   },
   dattoZod: {
     input: { target: spec },
     output: {
-      mode: 'tags-split',
-      client: 'zod',
-      target: './src/generated/schemas/api.zod.ts',
-      fileExtension: '.zod.ts',
+      mode: "tags-split",
+      client: "zod",
+      target: "./src/generated/schemas/api.zod.ts",
+      fileExtension: ".zod.ts",
       override: {
         zod: {
           strict: {
@@ -63,10 +65,10 @@ export default defineConfig({
             header: true,
           },
           coerce: {
-            body: ['date'],
-            response: ['date'],
-            param: ['date'],
-            query: ['date'],
+            body: ["date"],
+            response: ["date"],
+            param: ["date"],
+            query: ["date"],
           },
         },
       },
