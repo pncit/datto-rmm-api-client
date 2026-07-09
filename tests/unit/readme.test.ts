@@ -6,9 +6,6 @@ import { describe, expect, it } from "vitest";
 
 import { OPERATION_MAP } from "@/client/operation-map";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const README_PATH = resolve(__dirname, "../../README.md");
-
 /**
  * Guards the README against drift from the actual public surface (R18, plan Phase 10 "Tests").
  * `OPERATION_MAP` is the same authoritative `{ method, path } -> client.<ns>.<method>` table
@@ -17,6 +14,10 @@ const README_PATH = resolve(__dirname, "../../README.md");
  * than a hand-duplicated literal list, means a future namespace rename/addition that updates the
  * map but not the README fails this test instead of shipping a stale doc.
  */
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const README_PATH = resolve(__dirname, "../../README.md");
+
 /**
  * Slices the README down to the text belonging to a single `### \`client.<ns>\`` section (from
  * that heading up to, but excluding, the next `##`/`###` heading). Scoping assertions to this
@@ -88,17 +89,6 @@ describe("README", () => {
       expect(readme).toContain(`\`client.${ns}\``);
     },
   );
-
-  it.each(namespaces)("documents at least one method for client.%s", (ns) => {
-    const methodsForNs = OPERATION_MAP.filter((entry) => entry.ns === ns).map(
-      (entry) => entry.method,
-    );
-    const section = namespaceSection(readme, ns);
-    const hasDocumentedMethod = methodsForNs.some((method) =>
-      section.includes(`\`${method}(`),
-    );
-    expect(hasDocumentedMethod).toBe(true);
-  });
 
   it.each(OPERATION_MAP)(
     "documents $ns.$method as $specMethod /api$specPath",
