@@ -106,7 +106,7 @@ positives on the committed OpenAPI document's own prose, false negatives on a no
 exposing `validateResponse`/`validateArrayResponse` publicly, with no HTTP/nock involved since
 these take already-parsed data) drives every fixture through the *exact* validation path every
 `*Resource` method (Phase 7/8) uses — `validateResponse`/`validateArrayResponse` →
-`parseLenient` — rather than a parallel, hand-rolled schema call. Six describe blocks cover the
+`parseLenient` — rather than a parallel, hand-rolled schema call. Five describe blocks cover the
 plan's named assertions:
 1. **Every fixture validates leniently** (R5/R8/R17) — every single-entity and page-envelope
    fixture parses without throwing and without an unexpected drop.
@@ -266,9 +266,10 @@ implementation decision, documented below rather than treated as a deviation.
   agent"); validating the reconciled schemas against a genuine live sweep remains the plan's
   Deferred Validation item and needs a live account and human execution.
 - **`sanitize-fixtures.mjs` has no automated test proving it against a genuine multi-entity sweep
-  shape** (only hand-built inline samples) — acceptable per the plan (no live data available to
-  this agent), but worth a maintainer smoke-test the first time it is actually run against a real
-  export.
+  shape** (only hand-built inline samples, including the CLI round-trip test covering `main()`'s
+  argv parsing, file I/O, and non-overwrite-of-input behavior) — acceptable per the plan (no live
+  data available to this agent), but worth a maintainer smoke-test the first time it is actually
+  run against a real export.
 - **README/runbook documentation of the sanitizer's "run before committing" step is Phase 10's
   responsibility**, not added here (this phase's plan section explicitly marks Documentation "None
   yet").

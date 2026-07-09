@@ -1,9 +1,18 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, test } from "vitest";
 
 import {
   SECRET_KEY_PATTERNS,
   sanitizeValue,
 } from "../../../scripts/sanitize-fixtures.mjs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const SCRIPT_PATH = resolve(__dirname, "../../../scripts/sanitize-fixtures.mjs");
 
 describe("sanitizeValue", () => {
   test("redacts every udf* field to null at the top level while preserving every other field", () => {
@@ -120,5 +129,62 @@ describe("sanitizeValue", () => {
     expect(
       SECRET_KEY_PATTERNS.some((pattern) => pattern.test("apiSecretKey")),
     ).toBe(false);
+  });
+});
+
+describe("CLI (main())", () => {
+  test("reads the input file, writes a sanitized copy with a trailing newline, and leaves the input untouched", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sanitize-fixtures-test-"));
+    const inputPath = join(dir, "raw-sweep.json");
+    const outputPath = join(dir, "sanitized-sweep.json");
+    const raw = { uid: "device-uid-1", hostname: "PC1", udf: { udf1: "S3CR3T" } };
+    writeFileSync(inputPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
+
+    try {
+      const stdout = execFileSync(
+        process.execPath,
+        [SCRIPT_PATH, inputPath, outputPath],
+        { encoding: "utf8" },
+      );
+
+      expect(stdout).toContain(`wrote ${outputPath}`);
+
+      // Input file is read-only input; the script must never overwrite it in place.
+      expect(JSON.parse(readFileSync(inputPath, "utf8"))).toEqual(raw);
+
+      const outputRaw = readFileSync(outputPath, "utf8");
+      expect(outputRaw.endsWith("\n")).toBe(true);
+      expect(JSON.parse(outputRaw)).toEqual({
+        uid: "device-uid-1",
+        hostname: "PC1",
+        udf: { udf1: null },
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("prints usage and exits 1 when the output path argument is missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sanitize-fixtures-test-"));
+    const inputPath = join(dir, "raw-sweep.json");
+    writeFileSync(inputPath, "{}", "utf8");
+
+    try {
+      let threw = false;
+      try {
+        execFileSync(process.execPath, [SCRIPT_PATH, inputPath], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (error) {
+        threw = true;
+        const execError = error as { status: number | null; stderr: string };
+        expect(execError.status).toBe(1);
+        expect(execError.stderr).toContain("Usage:");
+      }
+      expect(threw).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
