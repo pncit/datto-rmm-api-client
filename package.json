@@ -5,14 +5,17 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "test": "jest",
-    "build": "tsc",
+    "generate": "node scripts/patch-spec.mjs && orval && node scripts/dedupe-generated-index.mjs && node scripts/widen-response-enums.mjs",
+    "generate:raw": "orval",
+    "build": "tsup",
     "format": "prettier --write .",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build && npm test"
+    "prepublishOnly": "npm run build && npm run test"
   },
   "keywords": [],
   "author": "Rob Gilbreath",
@@ -43,14 +46,17 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/jest": "^30.0.0",
+    "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.62.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "@vitest/coverage-v8": "^4.0.16",
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
-    "jest": "^30.0.4",
+    "nock": "^14.0.15",
+    "orval": "^7.0.0",
     "prettier": "^3.6.2",
-    "ts-jest": "^29.4.0",
-    "typescript": "^5.8.3"
+    "tsup": "^8.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.16"
   }
 }

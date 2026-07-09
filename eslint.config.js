@@ -74,7 +74,9 @@ export default [
         sourceType: 'module',
       },
       globals: {
-        // Jest globals
+        // Vitest globals (vitest.config.ts sets `test.globals: true`); test files also
+        // import these explicitly from 'vitest', but declaring them here keeps `no-undef`
+        // (already off below) consistent with the runtime environment.
         describe: 'readonly',
         it: 'readonly',
         test: 'readonly',
@@ -83,7 +85,7 @@ export default [
         afterEach: 'readonly',
         beforeAll: 'readonly',
         afterAll: 'readonly',
-        jest: 'readonly',
+        vi: 'readonly',
       },
     },
     plugins: {

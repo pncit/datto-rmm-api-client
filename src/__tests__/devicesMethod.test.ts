@@ -1,10 +1,16 @@
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
+
+import { describe, expect, test, vi, type Mock } from "vitest";
+import { ZodError } from "zod/v4";
+
 import { createDattoRmmClient } from "../client";
 import { DevicesEnvelopeSchema } from "../internal/devicesEnvelope";
 import { LoggerLike } from "../logger";
 import { Result } from "../result";
-import { ZodError } from "zod/v4";
-import * as fs from "fs";
-import * as path from "path";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const devicesPage = JSON.parse(
   fs.readFileSync(path.join(__dirname, "fixtures/devicesPage.json"), "utf-8"),
@@ -43,10 +49,10 @@ class MockAxios {
 
 function mockLogger(): LoggerLike {
   return {
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   };
 }
 
@@ -390,7 +396,7 @@ describe("getAccountDevices resilient validation", () => {
     expect(r.error.type).toBe("validation-error");
     expect(r.error.title).toBe("Malformed devices page envelope");
     expect("value" in r).toBe(false);
-    const errorMessages = (logger.error as jest.Mock).mock.calls.map((c) =>
+    const errorMessages = (logger.error as Mock).mock.calls.map((c) =>
       String(c[0]),
     );
     expect(
@@ -399,7 +405,7 @@ describe("getAccountDevices resilient validation", () => {
   });
 
   test("warn, a divergent device stays in value and is logged via logger.warn, not console (R6, R8)", async () => {
-    const consoleWarnSpy = jest
+    const consoleWarnSpy = vi
       .spyOn(console, "warn")
       .mockImplementation(() => {});
     try {
@@ -585,7 +591,7 @@ describe("getDeviceByUid", () => {
     expect(r.error.detail).toContain("deviceClass");
 
     expect(logger.error).toHaveBeenCalledTimes(1);
-    const [message] = (logger.error as jest.Mock).mock.calls[0];
+    const [message] = (logger.error as Mock).mock.calls[0];
     expect(message).toContain("id=1");
     expect(message).toContain("deviceClass");
     // Must not duplicate the standalone word "Device" (e.g. a "Device ... for {uid}" prefix on
@@ -616,7 +622,7 @@ describe("getDeviceByUid", () => {
     expect(r.value.deviceClass).toBe("router");
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
-    const [message] = (logger.warn as jest.Mock).mock.calls[0];
+    const [message] = (logger.warn as Mock).mock.calls[0];
     expect(message).toContain("deviceClass");
     expect(message).not.toContain("\n");
   });

@@ -1,15 +1,17 @@
+import { describe, expect, test, vi, type Mock } from "vitest";
 import { z, ZodError } from "zod/v4";
-import { validate, validateItems } from "../validation";
+
 import { LoggerLike } from "../logger";
+import { validate, validateItems } from "../validation";
 
 const schema = z.object({ id: z.number(), name: z.string() });
 
 function mockLogger(): LoggerLike {
   return {
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
   };
 }
 
@@ -34,7 +36,7 @@ describe("validate", () => {
   });
 
   test("warn on invalid data returns raw value and logs the failing path via logger.warn, not console", () => {
-    const consoleWarnSpy = jest
+    const consoleWarnSpy = vi
       .spyOn(console, "warn")
       .mockImplementation(() => {});
     try {
@@ -43,7 +45,7 @@ describe("validate", () => {
       const result = validate(schema, data, "warn", logger);
       expect(result).toEqual(data);
       expect(logger.warn).toHaveBeenCalledTimes(1);
-      const [message] = (logger.warn as jest.Mock).mock.calls[0];
+      const [message] = (logger.warn as Mock).mock.calls[0];
       expect(message).toContain("name");
       expect(message).not.toContain("\n");
       expect(consoleWarnSpy).not.toHaveBeenCalled();
@@ -88,7 +90,7 @@ describe("validateItems", () => {
     expect(warnings[0].detail).toContain("name");
     expect(warnings[0].raw).toBeInstanceOf(ZodError);
     expect(logger.error).toHaveBeenCalledTimes(1);
-    const [message] = (logger.error as jest.Mock).mock.calls[0];
+    const [message] = (logger.error as Mock).mock.calls[0];
     expect(message).toContain(warnings[0].detail);
     expect(logger.warn).not.toHaveBeenCalled();
   });
@@ -149,7 +151,7 @@ describe("validateItems", () => {
   });
 
   test("warn, mixed returns all items raw/unmutated (unknown keys survive), no warnings, logs via logger not console", () => {
-    const consoleWarnSpy = jest
+    const consoleWarnSpy = vi
       .spyOn(console, "warn")
       .mockImplementation(() => {});
     try {
@@ -166,7 +168,7 @@ describe("validateItems", () => {
       expect((valid[0] as Record<string, unknown>).extra).toBe("keepme");
       expect(warnings).toHaveLength(0);
       expect(logger.warn).toHaveBeenCalledTimes(1);
-      const [message] = (logger.warn as jest.Mock).mock.calls[0];
+      const [message] = (logger.warn as Mock).mock.calls[0];
       expect(message).toContain("id=2");
       expect(message).toContain("name");
       expect(logger.error).not.toHaveBeenCalled();

@@ -1,3 +1,5 @@
+import { expect, test } from "vitest";
+
 import { createDattoRmmClient } from "../client";
 
 // This is a basic test to instantiate the client

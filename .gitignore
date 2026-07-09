@@ -137,3 +137,15 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Datto RMM OpenAPI codegen (Phase 2)
+# spec/openapi.json + spec/openapi-prev.json are committed (they are the reproducibility
+# baseline). spec/openapi.patched.json is a transient intermediate produced by
+# scripts/patch-spec.mjs on every `npm run generate` run and is never committed.
+spec/openapi.patched.json
+# The Orval endpoints layer is a transient by-product of the axios target (Orval cannot
+# emit types without also emitting endpoint stubs for a spec that declares paths); the
+# client never imports it, so it is git-ignored rather than committed.
+src/generated/endpoints/
+# NOTE: src/generated/types/ and src/generated/schemas/ are intentionally NOT ignored —
+# they are committed because they derive from an external spec (finalized in Phase 2).
