@@ -4,7 +4,8 @@
     "noEmit": true,
     "rootDir": ".",
     "types": ["vitest/globals", "node"],
-    "allowJs": true
+    "allowJs": true,
+    "checkJs": true
   },
   "include": [
     "src/**/*.test.ts",

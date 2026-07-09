@@ -76,7 +76,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { walkSchema, HTTP_METHODS, refName } from "./lib/schema-walk.mjs";
+import { walkSchema, forEachOperation, refName } from "./lib/schema-walk.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PATCHED_SPEC_PATH = resolve(__dirname, "../spec/openapi.patched.json");
@@ -102,6 +102,10 @@ export const REQUEST_ROOT_SUFFIXES = [
   "PathParameters",
 ];
 
+/**
+ * @param {string} rawName
+ * @returns {string}
+ */
 function toPascalCase(rawName) {
   return rawName
     .split(/[\s_-]+/)
@@ -115,6 +119,12 @@ function toPascalCase(rawName) {
  * `$ref`, `properties`, `items`, `additionalProperties`, and `allOf`/`oneOf`/`anyOf`. Cycle-safe
  * via `visitedRefs` (component names already expanded) and `visitedNodes` (object identity, for
  * non-$ref cycles within a single schema tree).
+ *
+ * @param {import('./lib/schema-walk.mjs').SchemaNode | undefined} node
+ * @param {Record<string, import('./lib/schema-walk.mjs').SchemaNode>} schemas
+ * @param {Set<string>} visitedRefs
+ * @param {Set<object>} visitedNodes
+ * @returns {void}
  */
 function collectComponentRefs(node, schemas, visitedRefs, visitedNodes) {
   walkSchema(
@@ -131,13 +141,26 @@ function collectComponentRefs(node, schemas, visitedRefs, visitedNodes) {
   );
 }
 
-/** True if `name`'s own schema, or any schema nested within it, declares an `enum`. */
+/**
+ * True if `name`'s own schema, or any schema nested within it, declares an `enum`.
+ *
+ * @param {string} name
+ * @param {Record<string, import('./lib/schema-walk.mjs').SchemaNode>} schemas
+ * @param {Set<string>} visitedNames
+ * @returns {boolean}
+ */
 function componentHasEnum(name, schemas, visitedNames) {
   if (visitedNames.has(name)) return false;
   visitedNames.add(name);
   return schemaHasEnum(schemas[name], schemas, visitedNames);
 }
 
+/**
+ * @param {import('./lib/schema-walk.mjs').SchemaNode | undefined} node
+ * @param {Record<string, import('./lib/schema-walk.mjs').SchemaNode>} schemas
+ * @param {Set<string>} visitedNames
+ * @returns {boolean}
+ */
 function schemaHasEnum(node, schemas, visitedNames) {
   let found = false;
   walkSchema(node, (subNode) => {
@@ -160,53 +183,51 @@ function schemaHasEnum(node, schemas, visitedNames) {
  * Builds `{ requestReach, responseReach }`: component name -> Set of `METHOD /path` labels.
  *
  * Iterates **every** content type of each operation's `requestBody` and each response — not just
- * `application/json` — mirroring `patch-spec.mjs`'s own `computeReachableComponentNames`. The real
- * spec genuinely uses the wildcard `*\/*` media type for some response bodies, so a guard that
- * only inspected `application/json` would miss a request/response share (or a response-only
- * component) reached solely through that wildcard content type, silently reintroducing the exact
- * "which content types carry a schema" defect the rest of the pipeline is engineered to catch.
+ * `application/json` — via the shared `forEachOperation` traversal (`scripts/lib/schema-walk.mjs`),
+ * mirroring `patch-spec.mjs`'s own `computeReachableComponentNames`. The real spec genuinely uses
+ * the wildcard `*\/*` media type for some response bodies, so a guard that only inspected
+ * `application/json` would miss a request/response share (or a response-only component) reached
+ * solely through that wildcard content type, silently reintroducing the exact "which content types
+ * carry a schema" defect the rest of the pipeline is engineered to catch.
+ *
+ * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
+ * @returns {{ requestReach: Map<string, Set<string>>, responseReach: Map<string, Set<string>> }}
  */
 function buildReachabilityMaps(spec) {
   const schemas = spec.components?.schemas ?? {};
   const requestReach = new Map();
   const responseReach = new Map();
 
+  /**
+   * @param {Map<string, Set<string>>} map
+   * @param {Set<string>} refs
+   * @param {string} opLabel
+   * @returns {void}
+   */
   const addReach = (map, refs, opLabel) => {
     for (const name of refs) {
       if (!map.has(name)) map.set(name, new Set());
-      map.get(name).add(opLabel);
+      /** @type {Set<string>} */ (map.get(name)).add(opLabel);
     }
   };
 
-  for (const [pathKey, pathItem] of Object.entries(spec.paths ?? {})) {
-    for (const [method, operation] of Object.entries(pathItem ?? {})) {
-      if (
-        !HTTP_METHODS.includes(method) ||
-        !operation ||
-        typeof operation !== "object"
-      )
-        continue;
-      const opLabel = `${method.toUpperCase()} ${pathKey}`;
+  forEachOperation(spec, (operation, opLabel) => {
+    for (const content of Object.values(operation.requestBody?.content ?? {})) {
+      if (!content?.schema) continue;
+      const refs = new Set();
+      collectComponentRefs(content.schema, schemas, refs, new Set());
+      addReach(requestReach, refs, opLabel);
+    }
 
-      for (const content of Object.values(
-        operation.requestBody?.content ?? {},
-      )) {
+    for (const response of Object.values(operation.responses ?? {})) {
+      for (const content of Object.values(response?.content ?? {})) {
         if (!content?.schema) continue;
         const refs = new Set();
         collectComponentRefs(content.schema, schemas, refs, new Set());
-        addReach(requestReach, refs, opLabel);
-      }
-
-      for (const response of Object.values(operation.responses ?? {})) {
-        for (const content of Object.values(response?.content ?? {})) {
-          if (!content?.schema) continue;
-          const refs = new Set();
-          collectComponentRefs(content.schema, schemas, refs, new Set());
-          addReach(responseReach, refs, opLabel);
-        }
+        addReach(responseReach, refs, opLabel);
       }
     }
-  }
+  });
 
   return { requestReach, responseReach };
 }
@@ -239,13 +260,15 @@ export function verifyNoSharedEnumBearingSchemas(spec) {
   const schemas = spec.components?.schemas ?? {};
   const { requestReach, responseReach } = buildReachabilityMaps(spec);
 
+  /** @type {Array<{ name: string, requestOps: string[], responseOps: string[] }>} */
   const offending = [];
   for (const [name, requestOps] of requestReach) {
-    if (responseReach.has(name) && componentHasEnum(name, schemas, new Set())) {
+    const responseOps = responseReach.get(name);
+    if (responseOps && componentHasEnum(name, schemas, new Set())) {
       offending.push({
         name,
         requestOps: [...requestOps].sort(),
-        responseOps: [...responseReach.get(name)].sort(),
+        responseOps: [...responseOps].sort(),
       });
     }
   }
@@ -275,8 +298,14 @@ const TYPE_ALIAS_NAME_RE = /export type (\w+) =/g;
 const ENUM_ALIAS_RE =
   /export type (\w+) = typeof \1\[keyof typeof \1\](?: \| \(string & \{\}\))?;/g;
 
-/** Extracts this generated file's own declared type name(s) and the local names it imports. */
+/**
+ * Extracts this generated file's own declared type name(s) and the local names it imports.
+ *
+ * @param {string} content
+ * @returns {{ importNames: Set<string>, primaryNames: Set<string> }}
+ */
 function parseGeneratedFile(content) {
+  /** @type {Set<string>} */
   const importNames = new Set();
   for (const match of content.matchAll(IMPORT_RE)) {
     for (const raw of match[1].split(",")) {
@@ -285,6 +314,7 @@ function parseGeneratedFile(content) {
     }
   }
 
+  /** @type {Set<string>} */
   const primaryNames = new Set();
   for (const match of content.matchAll(INTERFACE_NAME_RE))
     primaryNames.add(match[1]);
@@ -298,6 +328,9 @@ function parseGeneratedFile(content) {
  * Rewrites every enum-alias declaration in `content` to its widened form, returning both the
  * result and the number of declarations matched (independent of whether the output text actually
  * changed — see `ENUM_ALIAS_RE`). A file already in widened form still counts its matches here.
+ *
+ * @param {string} content
+ * @returns {{ content: string, matchCount: number }}
  */
 function widenEnumAliasLine(content) {
   let matchCount = 0;
@@ -308,6 +341,11 @@ function widenEnumAliasLine(content) {
   return { content: widened, matchCount };
 }
 
+/**
+ * @param {string} name
+ * @param {Set<string>} requestOnlyComponentNames
+ * @returns {boolean}
+ */
 function isRequestRootName(name, requestOnlyComponentNames) {
   return (
     REQUEST_ROOT_SUFFIXES.some((suffix) => name.endsWith(suffix)) ||
@@ -315,12 +353,19 @@ function isRequestRootName(name, requestOnlyComponentNames) {
   );
 }
 
-/** BFS-expands `roots` by following each name's own declared imports, transitively. */
+/**
+ * BFS-expands `roots` by following each name's own declared imports, transitively.
+ *
+ * @param {Set<string>} roots
+ * @param {Map<string, Set<string>>} nameToImports
+ * @returns {Set<string>}
+ */
 function expandExcludedNames(roots, nameToImports) {
   const excluded = new Set(roots);
   const queue = [...roots];
   while (queue.length > 0) {
-    const name = queue.shift();
+    // `queue.length > 0` guarantees `shift()` returns a value here.
+    const name = /** @type {string} */ (queue.shift());
     for (const imported of nameToImports.get(name) ?? []) {
       if (!excluded.has(imported)) {
         excluded.add(imported);
@@ -396,6 +441,16 @@ export function applyWidening(fileContentsByName, primaryNamesByFile, excludedNa
   let totalMatchCount = 0;
   for (const [fileName, content] of fileContentsByName) {
     const primaryNames = primaryNamesByFile.get(fileName);
+    if (!primaryNames) {
+      // `primaryNamesByFile` is always built from the same `fileContentsByName` map by
+      // `computeRootExclusion` (see its call sites), so every key here is expected to resolve.
+      // Fail loud rather than silently treating an unresolved file as excluded=false — a caller
+      // passing mismatched maps is a programming error this should surface immediately.
+      throw new Error(
+        `widen-response-enums: applyWidening got no parsed primary-name set for '${fileName}' — ` +
+          "primaryNamesByFile must be derived from the same fileContentsByName map",
+      );
+    }
     const isExcludedFile = [...primaryNames].some((name) =>
       excludedNames.has(name),
     );
@@ -430,8 +485,15 @@ export function widenGeneratedTypes(
   return applyWidening(fileContentsByName, primaryNamesByFile, excluded).files;
 }
 
+/**
+ * Recursively lists every `.ts` file under `dir` (excluding `index.ts`), relative to `dir`.
+ *
+ * @param {string} dir
+ * @returns {string[]}
+ */
 function walkTsFiles(dir) {
   const entries = readdirSync(dir);
+  /** @type {string[]} */
   const files = [];
   for (const entry of entries) {
     if (entry === "index.ts") continue;

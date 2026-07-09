@@ -44,7 +44,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { walkSchema, HTTP_METHODS, refName, COMPONENTS_SCHEMAS_PREFIX } from "./lib/schema-walk.mjs";
+import {
+  walkSchema,
+  forEachOperation,
+  refName,
+  COMPONENTS_SCHEMAS_PREFIX,
+} from "./lib/schema-walk.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SPEC_PATH = resolve(__dirname, "../spec/openapi.json");
@@ -186,15 +191,30 @@ export const VOID_WRITE_OPERATIONS = [
   "DELETE /v2/account/variable/{variableId}",
 ];
 
+/**
+ * Reads the nested value at `path` (a sequence of object/array keys) from `root`, returning
+ * `undefined` as soon as any intermediate segment is missing or not an object — never throws on
+ * a short path.
+ *
+ * @param {unknown} root
+ * @param {readonly (string | number)[]} path
+ * @returns {unknown}
+ */
 function getAtPath(root, path) {
+  /** @type {unknown} */
   let node = root;
   for (const key of path) {
     if (node == null || typeof node !== "object") return undefined;
-    node = node[key];
+    node = /** @type {Record<string | number, unknown>} */ (node)[key];
   }
   return node;
 }
 
+/**
+ * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
+ * @param {string[]} missing
+ * @returns {void}
+ */
 function patchTimestamps(spec, missing) {
   for (const [schemaName, fields] of Object.entries(TIMESTAMP_FIELDS)) {
     const props = spec.components?.schemas?.[schemaName]?.properties;
@@ -249,20 +269,28 @@ function patchAlertContext(spec, missing) {
   return oldContextNames;
 }
 
+/**
+ * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
+ * @param {string[]} missing
+ * @returns {void}
+ */
 function patchRequestResponseSplits(spec, missing) {
   for (const {
     sharedSchema,
     requestSchema,
     refLocations,
   } of REQUEST_RESPONSE_SPLITS) {
-    const sharedNode = spec.components?.schemas?.[sharedSchema];
-    if (!sharedNode) {
+    const schemas = spec.components?.schemas;
+    const sharedNode = schemas?.[sharedSchema];
+    if (!schemas || !sharedNode) {
       missing.push(`components.schemas.${sharedSchema}`);
       continue;
     }
 
     for (const path of refLocations) {
-      const node = getAtPath(spec, path);
+      const node = /** @type {import('./lib/schema-walk.mjs').SchemaNode | undefined} */ (
+        getAtPath(spec, path)
+      );
       const expectedRef = `${COMPONENTS_SCHEMAS_PREFIX}${sharedSchema}`;
       if (!node || node.$ref !== expectedRef) {
         missing.push(`${path.join(".")} (expected $ref: ${expectedRef})`);
@@ -272,7 +300,7 @@ function patchRequestResponseSplits(spec, missing) {
     }
 
     // Clone after rewriting refLocations so the clone itself isn't touched by the rewrite above.
-    spec.components.schemas[requestSchema] = structuredClone(sharedNode);
+    schemas[requestSchema] = structuredClone(sharedNode);
   }
 }
 
@@ -281,11 +309,16 @@ function patchRequestResponseSplits(spec, missing) {
  * operation's parameters, requestBody, or any response (any code, any content type) — the same
  * "does anything still use this?" question `pruneOrphanedContextSchemas` and
  * `patchMissingSuccessResponses` each need answered, computed once here.
+ *
+ * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
+ * @returns {Set<string>}
  */
 function computeReachableComponentNames(spec) {
   const schemas = spec.components?.schemas ?? {};
+  /** @type {Set<string>} */
   const reachable = new Set();
 
+  /** @param {import('./lib/schema-walk.mjs').SchemaNode | undefined} node */
   function followRefs(node) {
     walkSchema(
       node,
@@ -302,29 +335,19 @@ function computeReachableComponentNames(spec) {
     );
   }
 
-  for (const pathItem of Object.values(spec.paths ?? {})) {
-    for (const [method, operation] of Object.entries(pathItem ?? {})) {
-      if (
-        !HTTP_METHODS.includes(method) ||
-        !operation ||
-        typeof operation !== "object"
-      )
-        continue;
-      for (const param of operation.parameters ?? []) {
-        if (param?.schema) followRefs(param.schema);
-      }
-      for (const content of Object.values(
-        operation.requestBody?.content ?? {},
-      )) {
+  forEachOperation(spec, (operation) => {
+    for (const param of operation.parameters ?? []) {
+      if (param?.schema) followRefs(param.schema);
+    }
+    for (const content of Object.values(operation.requestBody?.content ?? {})) {
+      if (content?.schema) followRefs(content.schema);
+    }
+    for (const response of Object.values(operation.responses ?? {})) {
+      for (const content of Object.values(response?.content ?? {})) {
         if (content?.schema) followRefs(content.schema);
       }
-      for (const response of Object.values(operation.responses ?? {})) {
-        for (const content of Object.values(response?.content ?? {})) {
-          if (content?.schema) followRefs(content.schema);
-        }
-      }
     }
-  }
+  });
 
   return reachable;
 }
@@ -355,7 +378,9 @@ function pruneOrphanedContextSchemas(spec, oldContextNames, missing) {
   const candidates = new Set(oldContextNames.filter((name) => schemas[name]));
   const queue = [...candidates];
   while (queue.length > 0) {
-    const name = queue.shift();
+    // `queue.length > 0` guarantees `shift()` returns a value here; the non-null assertion
+    // documents that runtime guarantee for `checkJs` (which can't infer it from the loop guard).
+    const name = /** @type {string} */ (queue.shift());
     for (const sub of schemas[name]?.allOf ?? []) {
       if (typeof sub.$ref !== "string") continue;
       const baseName = refName(sub.$ref);
@@ -381,12 +406,25 @@ function pruneOrphanedContextSchemas(spec, oldContextNames, missing) {
   }
 }
 
+/**
+ * @param {{ content?: Record<string, { schema?: import('./lib/schema-walk.mjs').SchemaNode }> } | undefined} response
+ * @returns {import('./lib/schema-walk.mjs').SchemaNode | undefined}
+ */
 function responseSchema(response) {
   const content = response?.content;
   if (!content) return undefined;
   return content["application/json"]?.schema ?? content["*/*"]?.schema;
 }
 
+/**
+ * Structural deep-equality check used only to compare JSON-Schema-shaped values (plain objects/
+ * arrays/primitives from `JSON.parse`) — not a general-purpose deep-equal (no `Date`/`Map`/`Set`
+ * handling, which the data this walks over never contains).
+ *
+ * @param {unknown} a
+ * @param {unknown} b
+ * @returns {boolean}
+ */
 function deepEqual(a, b) {
   if (a === b) return true;
   if (
@@ -397,10 +435,12 @@ function deepEqual(a, b) {
   ) {
     return false;
   }
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
+  const aRecord = /** @type {Record<string, unknown>} */ (a);
+  const bRecord = /** @type {Record<string, unknown>} */ (b);
+  const aKeys = Object.keys(aRecord);
+  const bKeys = Object.keys(bRecord);
   if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every((key) => deepEqual(a[key], b[key]));
+  return aKeys.every((key) => deepEqual(aRecord[key], bRecord[key]));
 }
 
 /**
@@ -442,58 +482,54 @@ function deepEqual(a, b) {
  * @returns {void}
  */
 function patchMissingSuccessResponses(spec, missing) {
-  for (const [pathKey, pathItem] of Object.entries(spec.paths ?? {})) {
-    for (const [method, operation] of Object.entries(pathItem ?? {})) {
-      if (
-        !HTTP_METHODS.includes(method) ||
-        !operation ||
-        typeof operation !== "object"
-      )
-        continue;
+  forEachOperation(spec, (operation, opLabel) => {
+    const responses = operation.responses;
+    if (!responses || responses["200"] || responses["204"]) return;
 
-      const responses = operation.responses;
-      if (!responses || responses["200"] || responses["204"]) continue;
-
-      const opLabel = `${method.toUpperCase()} ${pathKey}`;
-      const distinctSchemas = [];
-      for (const response of Object.values(responses)) {
-        const schema = responseSchema(response);
-        if (schema && !distinctSchemas.some((s) => deepEqual(s, schema))) {
-          distinctSchemas.push(schema);
-        }
-      }
-
-      if (distinctSchemas.length === 1) {
-        responses["200"] = {
-          description:
-            "OK (success response synthesized from the spec's misattached error-code " +
-            "schema — see patch-spec.mjs's patchMissingSuccessResponses)",
-          content: {
-            "application/json": { schema: structuredClone(distinctSchemas[0]) },
-          },
-        };
-      } else if (distinctSchemas.length === 0) {
-        if (!VOID_WRITE_OPERATIONS.includes(opLabel)) {
-          missing.push(
-            `${opLabel} (no 200/204 and no inferable response schema; not a documented ` +
-              `void write in VOID_WRITE_OPERATIONS)`,
-          );
-        }
-      } else {
-        missing.push(
-          `${opLabel} (no 200/204; ${distinctSchemas.length} inconsistent response schemas ` +
-            `across error codes, cannot synthesize)`,
-        );
+    /** @type {import('./lib/schema-walk.mjs').SchemaNode[]} */
+    const distinctSchemas = [];
+    for (const response of Object.values(responses)) {
+      const schema = responseSchema(response);
+      if (schema && !distinctSchemas.some((s) => deepEqual(s, schema))) {
+        distinctSchemas.push(schema);
       }
     }
-  }
+
+    if (distinctSchemas.length === 1) {
+      responses["200"] = {
+        description:
+          "OK (success response synthesized from the spec's misattached error-code " +
+          "schema — see patch-spec.mjs's patchMissingSuccessResponses)",
+        content: {
+          "application/json": { schema: structuredClone(distinctSchemas[0]) },
+        },
+      };
+    } else if (distinctSchemas.length === 0) {
+      if (!VOID_WRITE_OPERATIONS.includes(opLabel)) {
+        missing.push(
+          `${opLabel} (no 200/204 and no inferable response schema; not a documented ` +
+            `void write in VOID_WRITE_OPERATIONS)`,
+        );
+      }
+    } else {
+      missing.push(
+        `${opLabel} (no 200/204; ${distinctSchemas.length} inconsistent response schemas ` +
+          `across error codes, cannot synthesize)`,
+      );
+    }
+  });
 }
 
 /**
  * Walks every JSON-Schema node reachable from the spec's `components.schemas` and from every
- * operation's parameters/requestBody/response bodies, invoking `visit(node)` once per distinct
- * schema object. Does not follow `$ref` (component schemas are already walked directly, so
- * following refs would just revisit the same objects through a second path).
+ * operation's parameters/requestBody/response bodies (every content type, not just
+ * `application/json` — see `forEachOperation`), invoking `visit(node)` once per distinct schema
+ * object. Does not follow `$ref` (component schemas are already walked directly, so following
+ * refs would just revisit the same objects through a second path).
+ *
+ * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
+ * @param {(node: import('./lib/schema-walk.mjs').SchemaNode) => void} visit
+ * @returns {void}
  */
 function walkAllSchemaNodes(spec, visit) {
   const visited = new Set();
@@ -502,28 +538,28 @@ function walkAllSchemaNodes(spec, visit) {
     walkSchema(schema, visit, visited);
   }
 
-  for (const pathItem of Object.values(spec.paths ?? {})) {
-    for (const operation of Object.values(pathItem ?? {})) {
-      if (!operation || typeof operation !== "object") continue;
-      for (const param of operation.parameters ?? []) {
-        if (param?.schema) walkSchema(param.schema, visit, visited);
-      }
-      const requestSchema =
-        operation.requestBody?.content?.["application/json"]?.schema;
-      if (requestSchema) walkSchema(requestSchema, visit, visited);
-      for (const response of Object.values(operation.responses ?? {})) {
-        const responseBodySchema =
-          response?.content?.["application/json"]?.schema;
-        if (responseBodySchema) walkSchema(responseBodySchema, visit, visited);
+  forEachOperation(spec, (operation) => {
+    for (const param of operation.parameters ?? []) {
+      if (param?.schema) walkSchema(param.schema, visit, visited);
+    }
+    for (const content of Object.values(operation.requestBody?.content ?? {})) {
+      if (content?.schema) walkSchema(content.schema, visit, visited);
+    }
+    for (const response of Object.values(operation.responses ?? {})) {
+      for (const content of Object.values(response?.content ?? {})) {
+        if (content?.schema) walkSchema(content.schema, visit, visited);
       }
     }
-  }
+  });
 }
 
 /**
  * Strips two classes of malformed keyword usage — see the module doc — spec-wide. Returns the
  * counts fixed (for logging); never fails loud, since there is no fixed anchor list, only a
  * malformed-condition sweep.
+ *
+ * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
+ * @returns {{ patternOnNonStringFixed: number, redundantArrayEnumFixed: number }}
  */
 function fixMalformedNonStringConstraints(spec) {
   let patternOnNonStringFixed = 0;
@@ -556,6 +592,7 @@ function fixMalformedNonStringConstraints(spec) {
  * @returns {import('./lib/schema-walk.mjs').OpenApiSpecFragment}
  */
 export function patchSpec(spec) {
+  /** @type {string[]} */
   const missing = [];
 
   patchTimestamps(spec, missing);

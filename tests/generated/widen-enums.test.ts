@@ -11,6 +11,7 @@ import {
 import type {
   StrictSchemaNode,
   StrictOpenApiOperation,
+  StrictOpenApiSpecFragment,
 } from "./strict-fixture-types";
 
 function enumFile(name: string, members: string[]) {
@@ -281,7 +282,7 @@ describe("computeRequestOnlyComponentNames", () => {
           [requestRef]: { type: "object", properties: {} } satisfies StrictSchemaNode,
         },
       },
-    };
+    } satisfies StrictOpenApiSpecFragment;
   }
 
   test("includes a component reachable only from a requestBody", () => {
@@ -356,7 +357,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
           } satisfies StrictSchemaNode,
         },
       },
-    };
+    } satisfies StrictOpenApiSpecFragment;
 
     expect(() => verifyNoSharedEnumBearingSchemas(spec)).toThrow(
       /ProxySettings/,
@@ -407,7 +408,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
           } satisfies StrictSchemaNode,
         },
       },
-    };
+    } satisfies StrictOpenApiSpecFragment;
 
     expect(() => verifyNoSharedEnumBearingSchemas(spec)).toThrow(
       /ProxySettings/,
@@ -452,7 +453,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
           } satisfies StrictSchemaNode,
         },
       },
-    };
+    } satisfies StrictOpenApiSpecFragment;
 
     expect(() => verifyNoSharedEnumBearingSchemas(spec)).toThrow(
       /ProxySettings/,
@@ -497,7 +498,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
           } satisfies StrictSchemaNode,
         },
       },
-    };
+    } satisfies StrictOpenApiSpecFragment;
 
     expect(() => verifyNoSharedEnumBearingSchemas(spec)).not.toThrow();
   });
@@ -526,7 +527,7 @@ describe("verifyWideningHappened", () => {
         } satisfies StrictSchemaNode,
       },
     },
-  };
+  } satisfies StrictOpenApiSpecFragment;
 
   test("throws when the spec has a response-reachable enum-bearing schema but 0 enum-alias declarations were widened", () => {
     expect(() =>
@@ -560,7 +561,7 @@ describe("verifyWideningHappened", () => {
           Device: { type: "object", properties: { name: { type: "string" } } } satisfies StrictSchemaNode,
         },
       },
-    };
+    } satisfies StrictOpenApiSpecFragment;
 
     expect(() =>
       verifyWideningHappened(specWithoutEnum, new Set(), new Set(), 0),

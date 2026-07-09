@@ -113,6 +113,45 @@ export function walkSchema(root, visit, visited = new Set()) {
     walkSchema(root.additionalProperties, visit, visited);
   }
   for (const keyword of SUBSCHEMA_KEYWORDS) {
-    for (const sub of root[keyword] ?? []) walkSchema(sub, visit, visited);
+    // `root[keyword]` is `unknown` per SchemaNode's index signature (the keyword-specific fields
+    // above are individually typed, but `allOf`/`oneOf`/`anyOf` are read generically here); narrow
+    // to the documented `SchemaNode[] | undefined` shape explicitly rather than relying on `??`
+    // over an `unknown`, which is not iterable under `checkJs`.
+    const subSchemas = /** @type {SchemaNode[] | undefined} */ (root[keyword]);
+    for (const sub of subSchemas ?? []) walkSchema(sub, visit, visited);
+  }
+}
+
+/**
+ * Invokes `visit(operation, opLabel)` once for every operation in `spec.paths` — every
+ * `paths[pathKey][method]` entry whose `method` is a recognized HTTP method (see `HTTP_METHODS`)
+ * and whose value is a non-null object. `opLabel` is the `"METHOD /path"` label used throughout
+ * both pipeline scripts for diagnostics and error messages.
+ *
+ * Centralizes the `for (paths) -> for (methods, HTTP_METHODS filter) -> operation` boilerplate
+ * previously reimplemented independently at each of `patch-spec.mjs`'s
+ * `computeReachableComponentNames`/`patchMissingSuccessResponses`/`walkAllSchemaNodes` and
+ * `widen-response-enums.mjs`'s `buildReachabilityMaps` — including, in `walkAllSchemaNodes`'s
+ * case, a copy that had silently drifted to skip the `HTTP_METHODS` filter entirely and to read
+ * only the `application/json` content type instead of every content type its three siblings
+ * consider. Routing all four traversals through one function means a future filter or
+ * content-type fix only has to land here, and can't drift between call sites again.
+ *
+ * @param {OpenApiSpecFragment} spec
+ * @param {(operation: OpenApiOperation, opLabel: string) => void} visit
+ * @returns {void}
+ */
+export function forEachOperation(spec, visit) {
+  for (const [pathKey, pathItem] of Object.entries(spec.paths ?? {})) {
+    for (const [method, operation] of Object.entries(pathItem ?? {})) {
+      if (
+        !HTTP_METHODS.includes(method) ||
+        !operation ||
+        typeof operation !== "object"
+      ) {
+        continue;
+      }
+      visit(operation, `${method.toUpperCase()} ${pathKey}`);
+    }
   }
 }

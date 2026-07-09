@@ -9,6 +9,7 @@ import {
 import type {
   StrictSchemaNode,
   StrictOpenApiOperation,
+  StrictOpenApiSpecFragment,
 } from "./strict-fixture-types";
 
 /**
@@ -97,7 +98,7 @@ function buildValidSpecFragment(): SpecFragment {
         } satisfies StrictSchemaNode,
       },
     },
-  };
+  } satisfies StrictOpenApiSpecFragment;
 }
 
 /**

@@ -49,3 +49,22 @@ export interface StrictOpenApiOperation {
     }
   >;
 }
+
+/**
+ * Closed (no index signature) mirror of the top-level spec-fragment container
+ * (`OpenApiSpecFragment` in `scripts/lib/schema-walk.mjs`), for the same reason
+ * `StrictSchemaNode`/`StrictOpenApiOperation` exist: the production type's `[key: string]:
+ * unknown` index signature — needed for its real caller's genuinely-untyped `JSON.parse` input —
+ * is exactly what lets a hand-typed fixture with a typo'd container key (`pahts` for `paths`)
+ * type-check with zero diagnostics, since any string key is a valid member of an indexed type.
+ * `openapi` is included (unlike the leaf types) because several fixtures — e.g.
+ * `patch-spec.test.ts`'s `buildValidSpecFragment` — carry it as a realistic top-level field.
+ *
+ * Apply via `satisfies` at the point each hand-written top-level spec object is constructed
+ * (`{ ... } satisfies StrictOpenApiSpecFragment`), mirroring the leaf pattern above.
+ */
+export interface StrictOpenApiSpecFragment {
+  openapi?: string;
+  paths?: Record<string, Record<string, StrictOpenApiOperation>>;
+  components?: { schemas?: Record<string, StrictSchemaNode> };
+}

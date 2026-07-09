@@ -33,6 +33,9 @@ const GENERATED_INDEX_PATH = resolve(
 /**
  * Normalizes an export line by removing a trailing `.js` extension and trimming whitespace, so
  * `export * from './foo'` and `export * from './foo.js'` are treated as the same export.
+ *
+ * @param {string} line
+ * @returns {string}
  */
 function normalizeExportLine(line) {
   return line
@@ -76,12 +79,17 @@ export function dedupeExportLines(content) {
   return { content: deduped.join("\n"), duplicatesRemoved };
 }
 
+/**
+ * @returns {void}
+ */
 function main() {
+  /** @type {string} */
   let content;
   try {
     content = readFileSync(GENERATED_INDEX_PATH, "utf-8");
   } catch (error) {
-    console.error(`Could not read ${GENERATED_INDEX_PATH}:`, error.message);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Could not read ${GENERATED_INDEX_PATH}:`, message);
     process.exitCode = 1;
     return;
   }
