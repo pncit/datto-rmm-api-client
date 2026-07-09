@@ -1363,6 +1363,75 @@
       },
       "session_id": "604a71dc-4043-45f4-a9c8-3037d44a66a8",
       "turn": "docs/implementation/full-api-surface/review-plan/architect-r6.md"
+    },
+    {
+      "t": 1783571749,
+      "kind": "worker",
+      "agent": "planner",
+      "label": "plan:p2 reviser r11",
+      "ok": true,
+      "started_at": "2026-07-09T04:30:27+00:00",
+      "duration_s": 321.2,
+      "api_duration_s": 310.3,
+      "turns": 13,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.6604,
+      "tokens": {
+        "input": 835,
+        "output": 26117,
+        "cache_read": 527666,
+        "cache_creation": 73947
+      },
+      "session_id": "5702e4e1-fbd5-4c30-91d3-d2bc629b159b",
+      "turn": "docs/implementation/full-api-surface/review-plan/reviser-r11.md"
+    },
+    {
+      "t": 1783571889,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "plan:p2 engineer r7",
+      "ok": true,
+      "started_at": "2026-07-09T04:35:49+00:00",
+      "duration_s": 140.2,
+      "api_duration_s": 129.4,
+      "turns": 14,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.9523,
+      "tokens": {
+        "input": 833,
+        "output": 8620,
+        "cache_read": 186136,
+        "cache_creation": 63961
+      },
+      "session_id": "15739e82-7fe1-4345-8f48-501517c31f09",
+      "turn": "docs/implementation/full-api-surface/review-plan/engineer-r7.md"
+    },
+    {
+      "t": 1783571978,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "plan:p2 architect r7",
+      "ok": true,
+      "started_at": "2026-07-09T04:35:49+00:00",
+      "duration_s": 229.0,
+      "api_duration_s": 222.0,
+      "turns": 12,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.3733,
+      "tokens": {
+        "input": 827,
+        "output": 14895,
+        "cache_read": 270292,
+        "cache_creation": 86160
+      },
+      "session_id": "d93a1b19-218b-4a1c-a440-c731a4dc58e2",
+      "turn": "docs/implementation/full-api-surface/review-plan/architect-r7.md"
     }
   ],
   "invocation": {
