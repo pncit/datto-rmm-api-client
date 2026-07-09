@@ -1,6 +1,6 @@
 {
   "name": "datto-rmm-api-client",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "ESM-only server-side TypeScript client for Datto RMM API v2",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
