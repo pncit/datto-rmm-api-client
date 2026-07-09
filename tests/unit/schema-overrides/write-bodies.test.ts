@@ -39,6 +39,14 @@ describe("siteCreateBodySchema (device-job-create's sibling: already spec-requir
     const result = siteCreateBodySchema.safeParse({ description: "no name" });
     expect(result.success).toBe(false);
   });
+
+  it("rejects an unknown key (the generated body is a strict object)", () => {
+    const result = siteCreateBodySchema.safeParse({
+      name: "New Site",
+      notASiteField: "value",
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("deviceJobCreateBodySchema (already spec-required)", () => {
@@ -52,6 +60,15 @@ describe("deviceJobCreateBodySchema (already spec-required)", () => {
 
   it("rejects a body missing `jobComponent`", () => {
     const result = deviceJobCreateBodySchema.safeParse({ jobName: "Reboot" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an unknown key (the generated body is a strict object)", () => {
+    const result = deviceJobCreateBodySchema.safeParse({
+      jobName: "Reboot",
+      jobComponent: {},
+      notAJobField: "value",
+    });
     expect(result.success).toBe(false);
   });
 });
@@ -71,6 +88,14 @@ describe("warrantyWriteBodySchema", () => {
 
   it("rejects an empty body (warrantyDate must be present, even if null)", () => {
     const result = warrantyWriteBodySchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an unknown key (the generated body is a strict object)", () => {
+    const result = warrantyWriteBodySchema.safeParse({
+      warrantyDate: "2027-01-01",
+      notAWarrantyField: "value",
+    });
     expect(result.success).toBe(false);
   });
 });
@@ -93,6 +118,21 @@ describe("createSiteVariableWriteBodySchema / createAccountVariableWriteBodySche
       createAccountVariableWriteBodySchema.safeParse({ value: "v" }).success,
     ).toBe(false);
   });
+
+  it("rejects an unknown key (the generated body is a strict object)", () => {
+    expect(
+      createSiteVariableWriteBodySchema.safeParse({
+        name: "VAR",
+        notAVariableField: "value",
+      }).success,
+    ).toBe(false);
+    expect(
+      createAccountVariableWriteBodySchema.safeParse({
+        name: "VAR",
+        notAVariableField: "value",
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("updateSiteVariableWriteBodySchema / updateAccountVariableWriteBodySchema", () => {
@@ -111,6 +151,21 @@ describe("updateSiteVariableWriteBodySchema / updateAccountVariableWriteBodySche
       false,
     );
   });
+
+  it("rejects an unknown key (the generated body is a strict object)", () => {
+    expect(
+      updateSiteVariableWriteBodySchema.safeParse({
+        value: "v",
+        notAVariableField: "value",
+      }).success,
+    ).toBe(false);
+    expect(
+      updateAccountVariableWriteBodySchema.safeParse({
+        name: "n",
+        notAVariableField: "value",
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("updateProxyWriteBodySchema", () => {
@@ -121,6 +176,14 @@ describe("updateProxyWriteBodySchema", () => {
 
   it("rejects a completely empty body", () => {
     const result = updateProxyWriteBodySchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an unknown key (the generated body is a strict object)", () => {
+    const result = updateProxyWriteBodySchema.safeParse({
+      host: "proxy",
+      notAProxyField: "value",
+    });
     expect(result.success).toBe(false);
   });
 });

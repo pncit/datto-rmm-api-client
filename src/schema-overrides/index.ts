@@ -19,7 +19,7 @@ export {
 } from "./device-overrides";
 export { pageDetailsSchema, type PageDetails } from "./pagination";
 export type { Alert, Device } from "./types";
-export { OVERRIDE_ENTITIES } from "./types";
+export { alertSchema, deviceSchema, OVERRIDE_ENTITIES } from "./types";
 export {
   udfWriteBodySchema,
   type DeviceUdfInput,
@@ -30,9 +30,11 @@ export {
   createSiteVariableWriteBodySchema,
   type SiteVariableCreateInput,
   updateSiteVariableWriteBodySchema,
+  type SiteVariableUpdateInput,
   createAccountVariableWriteBodySchema,
   type AccountVariableCreateInput,
   updateAccountVariableWriteBodySchema,
+  type AccountVariableUpdateInput,
   updateProxyWriteBodySchema,
   type SiteProxyInput,
 } from "./write-bodies";

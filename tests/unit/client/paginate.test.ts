@@ -1,3 +1,4 @@
+import type { AxiosInstance } from "axios";
 import axios from "axios";
 import nock from "nock";
 import {
@@ -361,5 +362,113 @@ describe("BaseResource.paginate", () => {
     );
 
     expect(result).toHaveLength(2);
+  });
+
+  it("throws DattoValidationError rather than following a cross-origin nextPageUrl (SSRF guard)", async () => {
+    nock(BASE_URL)
+      .get("/account/devices")
+      .reply(200, {
+        pageDetails: {
+          count: 1,
+          totalCount: 2,
+          prevPageUrl: null,
+          nextPageUrl: "https://attacker.example.com/account/devices?page=2",
+        },
+        devices: [{ uid: "d1", hostname: "host1" }],
+      });
+    const { instance } = createTrackedAxios();
+    const resource = new TestResource(instance, createMockLogger());
+
+    await expect(
+      resource.walk(
+        "/account/devices",
+        "devices",
+        deviceSchema,
+        undefined,
+        "GET /account/devices",
+      ),
+    ).rejects.toMatchObject({
+      name: "DattoValidationError",
+      stage: "response",
+    });
+  });
+
+  it("throws DattoValidationError rather than looping forever on a cyclic nextPageUrl", async () => {
+    nock(BASE_URL)
+      .get("/account/devices")
+      .reply(200, {
+        pageDetails: {
+          count: 1,
+          totalCount: 2,
+          prevPageUrl: null,
+          nextPageUrl: `${BASE_URL}/account/devices?page=2`,
+        },
+        devices: [{ uid: "d1", hostname: "host1" }],
+      })
+      .get("/account/devices")
+      .query({ page: "2" })
+      .reply(200, {
+        pageDetails: {
+          count: 1,
+          totalCount: 2,
+          prevPageUrl: null,
+          // Points back at the already-fetched first page, forming a cycle.
+          nextPageUrl: `${BASE_URL}/account/devices`,
+        },
+        devices: [{ uid: "d2", hostname: "host2" }],
+      });
+    const { instance } = createTrackedAxios();
+    const resource = new TestResource(instance, createMockLogger());
+
+    await expect(
+      resource.walk(
+        "/account/devices",
+        "devices",
+        deviceSchema,
+        undefined,
+        "GET /account/devices",
+      ),
+    ).rejects.toMatchObject({
+      name: "DattoValidationError",
+      stage: "response",
+    });
+  });
+
+  it("throws DattoValidationError once the page cap is exceeded, for an ever-advancing nextPageUrl that never terminates", async () => {
+    // A hand-stubbed axios instance — exercising the guard's termination behavior directly rather
+    // than performing thousands of real (nock-mocked) HTTP round trips, which would make this test
+    // impractically slow without adding any assurance beyond what this already proves.
+    let page = 0;
+    const fakeAxios = {
+      defaults: { baseURL: BASE_URL },
+      get: vi.fn(async () => {
+        page += 1;
+        return {
+          data: {
+            pageDetails: {
+              count: 0,
+              totalCount: 0,
+              prevPageUrl: null,
+              nextPageUrl: `${BASE_URL}/account/devices?page=${page + 1}`,
+            },
+            devices: [],
+          },
+        };
+      }),
+    } as unknown as AxiosInstance;
+    const resource = new TestResource(fakeAxios, createMockLogger());
+
+    await expect(
+      resource.walk(
+        "/account/devices",
+        "devices",
+        deviceSchema,
+        undefined,
+        "GET /account/devices",
+      ),
+    ).rejects.toMatchObject({
+      name: "DattoValidationError",
+      stage: "response",
+    });
   });
 });

@@ -48,6 +48,15 @@ class TestResource extends BaseResource {
     return this.httpGet(path, schema, context, params);
   }
 
+  getArray<T>(
+    path: string,
+    itemSchema: z.ZodType<T>,
+    context: string,
+    params?: Record<string, unknown>,
+  ) {
+    return this.httpGetArray(path, itemSchema, context, params);
+  }
+
   postEmpty<T>(
     path: string,
     schema: z.ZodType<T>,
@@ -174,6 +183,66 @@ describe("BaseResource", () => {
       await resource.get("/foo", z.object({ name: z.string() }), "GET /foo", {
         active: "true",
       });
+
+      expect(scope.isDone()).toBe(true);
+    });
+  });
+
+  describe("httpGetArray", () => {
+    it("tags the request { kind: 'read' } and validates each item leniently", async () => {
+      const scope = nock(BASE_URL)
+        .get("/device/uid-1/audit/mac/00:11:22:33:44:55")
+        .reply(200, [{ name: "Alice", extra: "stripped" }, { name: "Bob" }]);
+      const { instance, descriptors } = createTrackedAxios();
+      const resource = new TestResource(instance, createMockLogger());
+
+      const result = await resource.getArray(
+        "/device/uid-1/audit/mac/00:11:22:33:44:55",
+        z.object({ name: z.string() }),
+        "GET /device/{uid}/audit/mac/{mac}",
+      );
+
+      expect(result).toEqual([{ name: "Alice" }, { name: "Bob" }]);
+      expect(descriptors).toEqual([{ kind: "read" }]);
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it("drops a malformed item instead of failing the whole call (R7)", async () => {
+      const scope = nock(BASE_URL)
+        .get("/device/uid-1/audit/mac/00:11:22:33:44:55")
+        .reply(200, [{ name: "Alice" }, { name: 42 }]);
+      const { instance } = createTrackedAxios();
+      const logger = createMockLogger();
+      const resource = new TestResource(instance, logger);
+
+      const result = await resource.getArray(
+        "/device/uid-1/audit/mac/00:11:22:33:44:55",
+        z.object({ name: z.string() }),
+        "GET /device/{uid}/audit/mac/{mac}",
+      );
+
+      expect(result).toEqual([{ name: "Alice" }]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        "dropped invalid response array items",
+        expect.objectContaining({ dropped: 1, total: 2 }),
+      );
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it("forwards query params", async () => {
+      const scope = nock(BASE_URL)
+        .get("/device/uid-1/audit/mac/00:11:22:33:44:55")
+        .query({ active: "true" })
+        .reply(200, []);
+      const { instance } = createTrackedAxios();
+      const resource = new TestResource(instance, createMockLogger());
+
+      await resource.getArray(
+        "/device/uid-1/audit/mac/00:11:22:33:44:55",
+        z.object({ name: z.string() }),
+        "GET /device/{uid}/audit/mac/{mac}",
+        { active: "true" },
+      );
 
       expect(scope.isDone()).toBe(true);
     });

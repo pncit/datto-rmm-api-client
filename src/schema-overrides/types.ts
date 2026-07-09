@@ -53,6 +53,31 @@ export type Alert = Omit<
   Pick<GeneratedAlert, (typeof ALERT_WIDENED_FIELDS)[number]>;
 
 /**
+ * `deviceResponseSchema`/`alertResponseSchema`, each typed as producing its reconciled entity type
+ * ({@link Device}/{@link Alert}) directly, rather than the schema's own `z.infer` (which still
+ * carries the closed, pre-graft enum types). A resource method (Phase 7/8) that writes
+ * `this.httpGet(path, deviceSchema, ctx)` and declares `Promise<Device>` gets that type for free —
+ * reaching for the un-coerced `deviceResponseSchema`/`alertResponseSchema` directly, which would
+ * silently re-narrow the return type to closed enums, is no longer the path of least resistance.
+ *
+ * This is a type-only assertion — the same cast `coerceSchema` names
+ * (`../client/resources/base-resource.ts`), applied here directly rather than by importing that
+ * helper: `schema-overrides` sits *below* `client/resources` in this codebase's dependency
+ * direction (design "Boundaries" — `base-resource` depends on `schema-overrides`, never the
+ * reverse), so importing `coerceSchema` from there into this module would invert it. Runtime
+ * validation is unaffected: both still run the real, reconciled `deviceResponseSchema`/
+ * `alertResponseSchema` parse; only the compile-time output type changes. `coerceSchema` itself
+ * remains available (and still necessary) for any reconciled type that doesn't get a named export
+ * here.
+ */
+export const deviceSchema: z.ZodType<Device> =
+  deviceResponseSchema as unknown as z.ZodType<Device>;
+
+/** See {@link deviceSchema}'s doc — the same binding for {@link Alert}. */
+export const alertSchema: z.ZodType<Alert> =
+  alertResponseSchema as unknown as z.ZodType<Alert>;
+
+/**
  * The single per-entity registry pairing each override-touched entity's reconciled **schema**
  * (not just its name) with its `WIDENED_FIELDS` constant. Phase 9's completeness guard iterates
  * this to feed each `schema` straight to `enumFieldPaths(schema: z.ZodType)` — which introspects

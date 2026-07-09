@@ -54,6 +54,22 @@ import {
  */
 
 /**
+ * Shared "reject an all-omitted body" refinement, applied below to every write body where no
+ * single field is unambiguously "the" required one (an update/settings body, where any subset of
+ * fields may legitimately change): every field being independently `undefined` means the write is
+ * a meaningless no-op that would still consume a write slot for nothing.
+ */
+function requireSomeField<T extends z.ZodType<Record<string, unknown>>>(
+  schema: T,
+  message = "at least one field must be provided",
+): T {
+  return schema.refine(
+    (body) => Object.values(body).some((value) => value !== undefined),
+    { message },
+  );
+}
+
+/**
  * `PUT /api/v2/site`'s body (`site-create`): the spec's own `CreateSiteRequest` component declares
  * `required: ["name"]`, and the generator already emits `name` as non-optional (`createBody`) — no
  * additional wrapper is needed. Re-exported here (unchanged) so every write body's required-ness is
@@ -77,13 +93,13 @@ export const deviceJobCreateBodySchema = createQuickJobBody;
  * slot for nothing. `.refine` rejects a body with every field `undefined`, requiring at least one
  * UDF to actually be set.
  */
-export const udfWriteBodySchema = setUdfFieldsBody.refine(
-  (body) => Object.values(body).some((value) => value !== undefined),
-  { message: "at least one udf field must be provided" },
+export const udfWriteBodySchema = requireSomeField(
+  setUdfFieldsBody,
+  "at least one udf field must be provided",
 );
 
 /** The validated input shape {@link udfWriteBodySchema} accepts. */
-export type DeviceUdfInput = z.infer<typeof setUdfFieldsBody>;
+export type DeviceUdfInput = z.infer<typeof udfWriteBodySchema>;
 
 /**
  * `POST /api/v2/device/{deviceUid}/warranty`'s body (`device-warranty-set`): the generated
@@ -129,10 +145,14 @@ export type SiteVariableCreateInput = z.infer<
  * same "reject an all-omitted body" judgment as {@link udfWriteBodySchema}: an update with *no*
  * fields at all is a meaningless no-op write.
  */
-export const updateSiteVariableWriteBodySchema = updateSiteVariableBody.refine(
-  (body) => Object.values(body).some((value) => value !== undefined),
-  { message: "at least one field must be provided" },
+export const updateSiteVariableWriteBodySchema = requireSomeField(
+  updateSiteVariableBody,
 );
+
+/** The validated input shape {@link updateSiteVariableWriteBodySchema} accepts. */
+export type SiteVariableUpdateInput = z.infer<
+  typeof updateSiteVariableWriteBodySchema
+>;
 
 /**
  * `PUT /api/v2/account/variable`'s body (`account-variable-set`'s create half): identical shape and
@@ -151,11 +171,14 @@ export type AccountVariableCreateInput = z.infer<
  * `POST /api/v2/account/variable/{variableId}`'s body (`account-variable-set`'s update half):
  * identical shape and rationale to {@link updateSiteVariableWriteBodySchema}.
  */
-export const updateAccountVariableWriteBodySchema =
-  updateAccountVariableBody.refine(
-    (body) => Object.values(body).some((value) => value !== undefined),
-    { message: "at least one field must be provided" },
-  );
+export const updateAccountVariableWriteBodySchema = requireSomeField(
+  updateAccountVariableBody,
+);
+
+/** The validated input shape {@link updateAccountVariableWriteBodySchema} accepts. */
+export type AccountVariableUpdateInput = z.infer<
+  typeof updateAccountVariableWriteBodySchema
+>;
 
 /**
  * `POST /api/v2/site/{siteUid}/settings/proxy`'s body (`device-proxy-set` in the Phase 5 rate-limit
@@ -166,10 +189,7 @@ export const updateAccountVariableWriteBodySchema =
  * the two update bodies above, this only rejects the unambiguous no-op case: a completely empty
  * body sets nothing and would still consume a write slot for it.
  */
-export const updateProxyWriteBodySchema = updateProxyBody.refine(
-  (body) => Object.values(body).some((value) => value !== undefined),
-  { message: "at least one field must be provided" },
-);
+export const updateProxyWriteBodySchema = requireSomeField(updateProxyBody);
 
 /** The validated input shape {@link updateProxyWriteBodySchema} accepts. */
-export type SiteProxyInput = z.infer<typeof updateProxyBody>;
+export type SiteProxyInput = z.infer<typeof updateProxyWriteBodySchema>;
