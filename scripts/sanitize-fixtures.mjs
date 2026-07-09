@@ -22,12 +22,17 @@
  * (any object/array/primitive) rather than driving off a Zod schema, so it works uniformly
  * across whatever shape a captured response actually has.
  *
+ * Name the raw input with a `raw-sweep.json` suffix (as in the example below) — `.gitignore`
+ * matches `*raw-sweep.json` at any path, so a raw capture named this way cannot be accidentally
+ * staged even if a maintainer forgets to run this script first.
+ *
  * @example
  * ```bash
  * node scripts/sanitize-fixtures.mjs raw-sweep.json tests/fixtures/sanitized-sweep.json
  * ```
  */
 import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -37,6 +42,13 @@ import { fileURLToPath } from "node:url";
  * Kept as an array — rather than a single hardcoded regex — so a future confirmed secret-bearing
  * field (should one ever be found) has one documented place to add to, without restructuring the
  * walk in {@link sanitizeValue}.
+ *
+ * This is the at-rest half (R17) of a two-part guarantee whose in-log half (R20) is
+ * `src/logging/mask.ts`'s `UDF_KEY`, and whose schema-shape half (R8) is
+ * `src/schema-overrides/device-overrides.ts`'s `UDF_KEY_PATTERN`. All three independently define
+ * "what is a UDF key" and must stay in lockstep — `tests/unit/security/udf-key-pattern-consistency.test.ts`
+ * asserts they agree on a representative key set so a future divergence fails the build instead of
+ * silently splitting the at-rest and in-log controls.
  *
  * @type {readonly RegExp[]}
  */
@@ -91,6 +103,18 @@ function main() {
     return;
   }
 
+  // The raw capture must never be overwritten in place: it is the one file this script exists to
+  // keep out of version control, and the caller relies on it still being there (to re-run against,
+  // or to discard deliberately) after this script exits.
+  if (resolve(inputPath) === resolve(outputPath)) {
+    console.error(
+      "sanitize-fixtures: output path must differ from input path (refusing to overwrite the raw capture in place)",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  /** @type {unknown} */
   const raw = JSON.parse(readFileSync(inputPath, "utf8"));
   const sanitized = sanitizeValue(raw);
   writeFileSync(outputPath, JSON.stringify(sanitized, null, 2) + "\n", "utf8");

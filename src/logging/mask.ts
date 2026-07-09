@@ -1,7 +1,18 @@
 import type { DattoLogger } from "./logger";
 
-/** Matches a UDF key at any nesting depth: `udf1`, `udf42`, `udf300`, etc. */
-const UDF_KEY = /^udf\d+$/;
+/**
+ * Matches a UDF key at any nesting depth: `udf1`, `udf42`, `udf300`, etc.
+ *
+ * This is one of three independent definitions of "what is a UDF key" in this codebase — the
+ * others are `scripts/sanitize-fixtures.mjs`'s `SECRET_KEY_PATTERNS` (the at-rest control, R17)
+ * and `src/schema-overrides/device-overrides.ts`'s `UDF_KEY_PATTERN` (the reconciled `udf` record
+ * schema's key shape, R8). This one is the in-log control (R20). All three exist to identify the
+ * same wire concept and must stay in lockstep: `tests/unit/security/udf-key-pattern-consistency.test.ts`
+ * asserts they agree on a representative key set and fails the build if a future edit to any one
+ * of them drifts from the other two. Exported (rather than module-private) so that test can import
+ * this exact pattern instead of re-deriving it.
+ */
+export const UDF_KEY = /^udf\d+$/;
 
 /**
  * Redacts a non-null UDF value, regardless of its wire type (string, number, nested

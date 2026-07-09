@@ -15,6 +15,7 @@ export {
 export {
   deviceResponseSchema,
   udfSchema,
+  UDF_KEY_PATTERN,
   DEVICE_WIDENED_FIELDS,
 } from "./device-overrides";
 export { pageDetailsSchema, type PageDetails } from "./pagination";

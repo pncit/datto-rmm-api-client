@@ -153,3 +153,11 @@ spec/openapi.patched.json
 src/generated/endpoints/
 # NOTE: src/generated/types/ and src/generated/schemas/ are intentionally NOT ignored —
 # they are committed because they derive from an external spec (finalized in Phase 2).
+
+# Raw (unsanitized) Datto RMM sweep captures (Phase 9) — the input to
+# scripts/sanitize-fixtures.mjs — must never be committed: UDF values have been observed to carry
+# secrets (BitLocker recovery keys, admin usernames, credentials). Name any such capture with a
+# `raw-sweep.json` suffix (matches the script's own usage example) so a raw capture cannot be
+# accidentally staged, independent of maintainer discipline. Only the *sanitized* output of the
+# script belongs under tests/fixtures/.
+*raw-sweep.json

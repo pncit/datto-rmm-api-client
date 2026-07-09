@@ -12,7 +12,10 @@ import {
 } from "../../../scripts/sanitize-fixtures.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SCRIPT_PATH = resolve(__dirname, "../../../scripts/sanitize-fixtures.mjs");
+const SCRIPT_PATH = resolve(
+  __dirname,
+  "../../../scripts/sanitize-fixtures.mjs",
+);
 
 describe("sanitizeValue", () => {
   test("redacts every udf* field to null at the top level while preserving every other field", () => {
@@ -137,7 +140,11 @@ describe("CLI (main())", () => {
     const dir = mkdtempSync(join(tmpdir(), "sanitize-fixtures-test-"));
     const inputPath = join(dir, "raw-sweep.json");
     const outputPath = join(dir, "sanitized-sweep.json");
-    const raw = { uid: "device-uid-1", hostname: "PC1", udf: { udf1: "S3CR3T" } };
+    const raw = {
+      uid: "device-uid-1",
+      hostname: "PC1",
+      udf: { udf1: "S3CR3T" },
+    };
     writeFileSync(inputPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
 
     try {
@@ -159,6 +166,62 @@ describe("CLI (main())", () => {
         hostname: "PC1",
         udf: { udf1: null },
       });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses to overwrite the input file in place when input and output paths are the same", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sanitize-fixtures-test-"));
+    const inputPath = join(dir, "raw-sweep.json");
+    const raw = { uid: "device-uid-1", udf: { udf1: "S3CR3T" } };
+    writeFileSync(inputPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
+
+    try {
+      let threw = false;
+      try {
+        execFileSync(process.execPath, [SCRIPT_PATH, inputPath, inputPath], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (error) {
+        threw = true;
+        const execError = error as { status: number | null; stderr: string };
+        expect(execError.status).toBe(1);
+        expect(execError.stderr).toContain(
+          "output path must differ from input path",
+        );
+      }
+      expect(threw).toBe(true);
+
+      // The raw capture must be byte-for-byte unchanged -- never overwritten in place.
+      expect(readFileSync(inputPath, "utf8")).toBe(
+        JSON.stringify(raw, null, 2) + "\n",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses to overwrite the input file in place even when the paths are spelled differently but resolve identically", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sanitize-fixtures-test-"));
+    const inputPath = join(dir, "raw-sweep.json");
+    const outputPath = join(dir, ".", "raw-sweep.json");
+    writeFileSync(inputPath, "{}", "utf8");
+
+    try {
+      let threw = false;
+      try {
+        execFileSync(process.execPath, [SCRIPT_PATH, inputPath, outputPath], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch (error) {
+        threw = true;
+        const execError = error as { status: number | null; stderr: string };
+        expect(execError.status).toBe(1);
+      }
+      expect(threw).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

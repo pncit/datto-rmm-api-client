@@ -132,15 +132,28 @@ describe("every committed fixture validates leniently", () => {
     },
   );
 
+  // Validates each @class fixture through the reconciled Alert schema *and* asserts its own
+  // context-specific fields survive the catchall override (R8), in one per-fixture assertion --
+  // a preserved field implies a successful parse, so a separate "just doesn't throw" case would
+  // only restate a subset of this one, and running per-fixture (rather than a manual `for` loop)
+  // keeps each fixture's failure isolated and named in the test output.
   it.each(ALERT_CONTEXT_FIXTURES)(
-    "%s validates through the reconciled Alert schema",
+    "%s validates through the reconciled Alert schema and its @class-specific fields survive",
     (name) => {
-      const data = loadFixture(name);
+      const data = loadFixture(name) as {
+        alertContext: Record<string, unknown>;
+      };
       const validator = makeValidator();
 
-      expect(() =>
-        validator.validateOne(data, alertSchema, `fixture:${name}`),
-      ).not.toThrow();
+      const result = validator.validateOne(
+        data,
+        alertSchema,
+        `fixture:${name}`,
+      ) as Alert & { alertContext: Record<string, unknown> };
+
+      for (const [key, value] of Object.entries(data.alertContext)) {
+        expect(result.alertContext[key]).toEqual(value);
+      }
     },
   );
 
@@ -158,25 +171,6 @@ describe("every committed fixture validates leniently", () => {
     // "many nulls" (design's observed reality) tolerated, not coerced away or rejected.
     expect(result.operatingSystem).toBeNull();
     expect(result.antivirus).toBeNull();
-  });
-
-  it("each alertContext fixture's own @class-specific fields survive via the catchall override (R8)", () => {
-    for (const name of ALERT_CONTEXT_FIXTURES) {
-      const data = loadFixture(name) as {
-        alertContext: Record<string, unknown>;
-      };
-      const validator = makeValidator();
-
-      const result = validator.validateOne(
-        data,
-        alertSchema,
-        `fixture:${name}`,
-      ) as Alert & { alertContext: Record<string, unknown> };
-
-      for (const [key, value] of Object.entries(data.alertContext)) {
-        expect(result.alertContext[key]).toEqual(value);
-      }
-    }
   });
 });
 
@@ -290,6 +284,16 @@ describe("open-enum widening: build-time and runtime cover the same field set at
 // Recursive WIDENED_FIELDS completeness guard (Phase 6 Step 3 gate)
 // ---------------------------------------------------------------------------
 
+/**
+ * A `widenedFields` entry that is deliberately listed despite having no enum of its own at the
+ * time this guard was written — e.g. a field grafted for a reason other than an enum. Empty
+ * today: both `DEVICE_WIDENED_FIELDS` and `ALERT_WIDENED_FIELDS` are enum-motivated end to end
+ * (see `src/schema-overrides/device-overrides.ts`/`alert-overrides.ts`). Any future entry that is
+ * genuinely enum-free must be added here, with a comment saying why, rather than silently making
+ * the reverse assertion below vacuous for that entry.
+ */
+const NO_ENUM_WIDENED_FIELDS: ReadonlySet<string> = new Set();
+
 describe("WIDENED_FIELDS completeness guard", () => {
   it("every enum field's containing top-level property is listed in its entity's WIDENED_FIELDS constant", () => {
     let enumFieldsChecked = 0;
@@ -310,6 +314,30 @@ describe("WIDENED_FIELDS completeness guard", () => {
     // returns nothing to check, rather than silently passing over zero assertions.
     expect(enumFieldsChecked).toBeGreaterThan(0);
   });
+
+  it("every WIDENED_FIELDS entry actually corresponds to an enum-bearing field (the reverse direction)", () => {
+    // The forward direction above proves widenedFields is a SUPERSET of the real enum fields. A
+    // stale or mistaken entry with no enum of its own would still pass that direction, yet would
+    // silently undo that field's reconciliation: `Omit<..., K> & Pick<Generated, K>` re-grafts the
+    // field from the un-reconciled generated type, discarding any non-enum reconciliation (e.g. a
+    // nullability widening) `deviceResponseSchema`/`alertResponseSchema` applied to it. This
+    // direction closes that gap by proving widenedFields is also a SUBSET of the real enum fields
+    // (modulo the explicit, documented `NO_ENUM_WIDENED_FIELDS` allowlist above).
+    for (const entry of OVERRIDE_ENTITIES) {
+      const topLevelEnumFields = [
+        ...new Set(
+          enumFieldPaths(entry.schema).map((path) => path.split(".")[0]!),
+        ),
+      ];
+
+      for (const widenedField of entry.widenedFields) {
+        if (NO_ENUM_WIDENED_FIELDS.has(widenedField)) {
+          continue;
+        }
+        expect(topLevelEnumFields).toContain(widenedField);
+      }
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -323,16 +351,14 @@ describe("UDF masking never emits a raw fixture UDF value (R20)", () => {
     };
     const sink = createMockLogger();
     const maskedLogger = withUdfMasking(sink);
-    const validator = makeValidator(maskedLogger);
 
-    validator.validateOne(
-      data,
-      deviceSchema,
-      "fixture:device-rmmnetworkdevice.json",
-    );
-    // Exercises the masking boundary directly against the fixture's own udf payload -- the shape
+    // Logs the fixture's own real udf payload through the masking boundary directly -- the shape
     // a real leniency diagnostic or resource log call would carry in `meta` per the R20 invariant
-    // (masking scrubs `meta`, never the message string -- src/logging/mask.ts).
+    // (masking scrubs `meta`, never the message string -- src/logging/mask.ts). The fixture
+    // validates cleanly (asserted in the "every committed fixture validates leniently" block
+    // above), so driving it through `validateResponse` here would emit no diagnostic at all and
+    // prove nothing about masking; this test's job is masking, not validation, so it exercises the
+    // masked logger directly against the fixture's genuine udf data.
     maskedLogger.debug("diagnostic carrying fixture udf data", {
       udf: data.udf,
     });

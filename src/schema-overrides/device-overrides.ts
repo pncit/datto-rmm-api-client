@@ -13,8 +13,22 @@ import { getByUidResponse } from "../generated/schemas/-v2-device/-v2-device.zod
  * whole item — the exact per-item silent-data-loss class (R7) the design condemns — and it keeps
  * the schema and the masker in agreement about what a UDF may be on the wire.
  */
+/**
+ * Matches a UDF key at any nesting depth: `udf1`, `udf42`, `udf300`, etc.
+ *
+ * This is one of three independent definitions of "what is a UDF key" in this codebase — the
+ * others are `src/logging/mask.ts`'s `UDF_KEY` (the in-log control, R20) and
+ * `scripts/sanitize-fixtures.mjs`'s `SECRET_KEY_PATTERNS` (the at-rest control, R17). This one
+ * shapes the reconciled `udf` record schema itself. All three exist to identify the same wire
+ * concept and must stay in lockstep: `tests/unit/security/udf-key-pattern-consistency.test.ts`
+ * asserts they agree on a representative key set and fails the build if a future edit to any one
+ * of them drifts from the other two. Exported (rather than inlined) so that test can import this
+ * exact pattern instead of re-deriving it.
+ */
+export const UDF_KEY_PATTERN = /^udf\d+$/;
+
 export const udfSchema = z.record(
-  z.string().regex(/^udf\d+$/),
+  z.string().regex(UDF_KEY_PATTERN),
   z
     .union([
       z.string(),
