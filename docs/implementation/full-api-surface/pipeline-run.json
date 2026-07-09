@@ -5,7 +5,8 @@
     },
     "phase8:stepA": {
       "implementation-auditor-r1-f2": "finding valid; gates have been corrected",
-      "implementation-auditor-r1-f4": "finding valid, design and plan have been updated to match spec."
+      "implementation-auditor-r1-f4": "finding valid, design and plan have been updated to match spec.",
+      "implementation-auditor-r2-f1": "findings valid; plan updated"
     }
   },
   "events": [
@@ -4846,6 +4847,174 @@
       },
       "session_id": "2ee3c1d9-2bd6-4080-b921-1a565334f2b5",
       "turn": "docs/implementation/full-api-surface/review-phase8/implementation-auditor-r2.md"
+    },
+    {
+      "t": 1783619688,
+      "kind": "worker",
+      "agent": "implementor",
+      "label": "phase8:stepA reviser r2",
+      "ok": true,
+      "started_at": "2026-07-09T17:52:08+00:00",
+      "duration_s": 160.3,
+      "api_duration_s": 147.8,
+      "turns": 21,
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "cost_usd": 0.5868,
+      "tokens": {
+        "input": 1157,
+        "output": 11914,
+        "cache_read": 454022,
+        "cache_creation": 44729
+      },
+      "session_id": "4f0db266-0506-493b-bbd0-ff6eaf1ca9dc",
+      "turn": "docs/implementation/full-api-surface/review-phase8/reviser-r2.md"
+    },
+    {
+      "t": 1783619760,
+      "kind": "worker",
+      "agent": "mediator",
+      "label": "phase8:stepA mediator r2",
+      "ok": true,
+      "started_at": "2026-07-09T17:54:48+00:00",
+      "duration_s": 71.3,
+      "api_duration_s": 53.3,
+      "turns": 8,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.2626,
+      "tokens": {
+        "input": 678,
+        "output": 2907,
+        "cache_read": 37413,
+        "cache_creation": 16784
+      },
+      "session_id": "788a3415-b7df-48ec-a821-704f894e7e96",
+      "turn": "docs/implementation/full-api-surface/review-phase8/mediator-r2.md"
+    },
+    {
+      "t": 1783620377,
+      "kind": "worker",
+      "agent": "implementation-auditor",
+      "label": "phase8:stepA implementation-auditor r3",
+      "ok": true,
+      "started_at": "2026-07-09T18:02:06+00:00",
+      "duration_s": 250.3,
+      "api_duration_s": 237.5,
+      "turns": 36,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 2.1034,
+      "tokens": {
+        "input": 853,
+        "output": 15397,
+        "cache_read": 1318092,
+        "cache_creation": 105517
+      },
+      "session_id": "0da464d6-6d00-4b94-853d-5fbc66d5e930",
+      "turn": "docs/implementation/full-api-surface/review-phase8/implementation-auditor-r3.md"
+    },
+    {
+      "t": 1783620398,
+      "kind": "gate",
+      "phase": 8,
+      "attempt": 1,
+      "result": "pass"
+    },
+    {
+      "t": 1783620800,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "phase8:stepB engineer r1",
+      "ok": true,
+      "started_at": "2026-07-09T18:06:38+00:00",
+      "duration_s": 402.3,
+      "api_duration_s": 366.2,
+      "turns": 41,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 2.0251,
+      "tokens": {
+        "input": 726,
+        "output": 21772,
+        "cache_read": 1268840,
+        "cache_creation": 84277
+      },
+      "session_id": "29c70bf6-50ae-4e97-a8c6-cf1a7559cab3",
+      "turn": "docs/implementation/full-api-surface/review-phase8/engineer-r1.md"
+    },
+    {
+      "t": 1783620827,
+      "kind": "worker",
+      "agent": "typescript-cop",
+      "label": "phase8:stepB typescript-cop r1",
+      "ok": true,
+      "started_at": "2026-07-09T18:06:38+00:00",
+      "duration_s": 429.2,
+      "api_duration_s": 408.8,
+      "turns": 83,
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "cost_usd": 4.3051,
+      "tokens": {
+        "input": 1176,
+        "output": 26918,
+        "cache_read": 9334454,
+        "cache_creation": 182914
+      },
+      "session_id": "aa2ce7ca-0657-4978-bf2b-38492f069f04",
+      "turn": "docs/implementation/full-api-surface/review-phase8/typescript-cop-r1.md"
+    },
+    {
+      "t": 1783620880,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "phase8:stepB architect r1",
+      "ok": true,
+      "started_at": "2026-07-09T18:06:38+00:00",
+      "duration_s": 482.1,
+      "api_duration_s": 441.2,
+      "turns": 39,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 2.384,
+      "tokens": {
+        "input": 722,
+        "output": 24611,
+        "cache_read": 1504051,
+        "cache_creation": 101313
+      },
+      "session_id": "95fee5ce-563b-49f3-856a-a3f24a7d970f",
+      "turn": "docs/implementation/full-api-surface/review-phase8/architect-r1.md"
+    },
+    {
+      "t": 1783621060,
+      "kind": "worker",
+      "agent": "project-lead",
+      "label": "phase8:stepB project-lead r1",
+      "ok": true,
+      "started_at": "2026-07-09T18:06:38+00:00",
+      "duration_s": 662.6,
+      "api_duration_s": 634.9,
+      "turns": 76,
+      "models": [
+        "claude-sonnet-5"
+      ],
+      "cost_usd": 3.9946,
+      "tokens": {
+        "input": 1299,
+        "output": 40004,
+        "cache_read": 7518986,
+        "cache_creation": 189152
+      },
+      "session_id": "10505d69-9f2c-4f9a-a9f4-3fb0db1ab095",
+      "turn": "docs/implementation/full-api-surface/review-phase8/project-lead-r1.md"
     }
   ],
   "invocation": {
