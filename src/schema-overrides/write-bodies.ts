@@ -7,6 +7,7 @@ import {
 import {
   createQuickJobBody,
   setUdfFieldsBody,
+  setWarrantyDataBody,
 } from "../generated/schemas/-v2-device/-v2-device.zod";
 import {
   createBody as createSiteBody,
@@ -89,11 +90,14 @@ export type DeviceUdfInput = z.infer<typeof setUdfFieldsBody>;
  * `setWarrantyDataBody` types `warrantyDate` as `z.string().optional()`, but the endpoint's own doc
  * says "The warranty date can also be set to null" — an omittable, non-nullable field would make
  * `{ warrantyDate: null }` (the documented way to clear a warranty date) fail `validateRequest`.
- * This override makes `warrantyDate` **required but nullable**: the field itself must be present
- * (an empty `{}` body is a meaningless no-op write, the same judgment as every other body here),
- * and its value may be a date string or `null` (clearing), matching the endpoint doc exactly.
+ * This override `.extend`s the generated body, overriding `warrantyDate` to be **required but
+ * nullable**: the field itself must be present (an empty `{}` body is a meaningless no-op write,
+ * the same judgment as every other body here), and its value may be a date string or `null`
+ * (clearing), matching the endpoint doc exactly. Deriving from `setWarrantyDataBody` (rather than
+ * rebuilding it) keeps this schema tied to the generated one, so a regeneration that renames or
+ * extends the warranty body is caught here instead of silently diverging.
  */
-export const warrantyWriteBodySchema = z.strictObject({
+export const warrantyWriteBodySchema = setWarrantyDataBody.extend({
   warrantyDate: z.string().nullable(),
 });
 
