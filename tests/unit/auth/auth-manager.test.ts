@@ -200,12 +200,18 @@ describe("AuthManager", () => {
   it("throws DattoApiError when a 200 grant response has a non-numeric expires_in", async () => {
     nock(BASE_URL)
       .post(GRANT_PATH)
-      .reply(200, { access_token: "tok-1", expires_in: "soon" });
+      .reply(200, { access_token: "live-bearer-token", expires_in: "soon" });
 
     const manager = new AuthManager(config());
     const error = await manager.getToken().catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(DattoApiError);
+    expect((error as DattoApiError).response).toBeUndefined();
+    const serialized = JSON.stringify(
+      error,
+      Object.getOwnPropertyNames(error as object),
+    );
+    expect(serialized).not.toContain("live-bearer-token");
   });
 
   it("treats a stalled grant request exceeding timeoutMs as a transport failure", async () => {

@@ -445,6 +445,27 @@ describe("createHttpClient", () => {
     expect(scope.isDone()).toBe(true);
   });
 
+  it("propagates an already-typed DattoApiError thrown by an upstream request interceptor unchanged", async () => {
+    const instance = client();
+    const upstreamError = new DattoApiError(
+      "Datto RMM authentication failed",
+      { statusCode: 503, response: { message: "grant unavailable" } },
+    );
+    instance.interceptors.request.use(() => {
+      throw upstreamError;
+    });
+
+    const error = await instance
+      .get("/foo", { rateDescriptor: { kind: "read" } })
+      .catch((e: unknown) => e);
+
+    expect(error).toBe(upstreamError);
+    expect((error as DattoApiError).statusCode).toBe(503);
+    expect((error as DattoApiError).response).toEqual({
+      message: "grant unavailable",
+    });
+  });
+
   it("logs a warn event when a 429 wait exceeds MAX_RETRY_AFTER_MS", async () => {
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const scope = nock(BASE_URL)

@@ -234,14 +234,26 @@ function build403Error(error: AxiosError): DattoApiError {
  * populated when the wait would exceed it; retries a network error or 5xx with exponential
  * backoff up to `retryPolicy.maxAttempts` total attempts; anything else (including retry
  * exhaustion) throws {@link DattoApiError.fromAxiosError}.
+ *
+ * Axios types a response interceptor's rejection handler as `(error: any) => any` — nothing
+ * guarantees `error` actually is an `AxiosError`. In particular, `AuthManager.attachTo`
+ * (`../auth/auth-manager.ts`) attaches a **request** interceptor onto this same instance that
+ * throws an already-constructed `DattoApiError` on a failed/malformed grant; axios delivers that
+ * rejection to this response interceptor too. Rethrowing it unchanged here (rather than treating
+ * it as an `AxiosError` and reconstructing a lossy `DattoApiError` from its `undefined`
+ * `config`/`response` fields) preserves the original error's real `statusCode`/`response`/`cause`.
  */
 async function handleResponseError(
   instance: AxiosInstance,
   retryPolicy: RetryPolicy,
   onUnauthorized: (() => void | Promise<void>) | undefined,
   logger: DattoLogger | undefined,
-  error: AxiosError,
+  error: unknown,
 ): Promise<AxiosResponse> {
+  if (!axios.isAxiosError(error)) {
+    throw error;
+  }
+
   const status = error.response?.status;
 
   if (status === 403) {
@@ -345,7 +357,7 @@ export function createHttpClient(config: HttpClientConfig): AxiosInstance {
 
   instance.interceptors.response.use(
     (response) => response,
-    (error: AxiosError) =>
+    (error: unknown) =>
       handleResponseError(
         instance,
         retryPolicy,

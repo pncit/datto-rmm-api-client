@@ -171,7 +171,6 @@ export class AuthManager {
         "Datto RMM authentication returned a malformed token response",
         {
           statusCode: response.status,
-          response: response.data,
           cause: parsed.error,
         },
       );
