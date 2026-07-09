@@ -12,7 +12,7 @@
   - The Datto RMM v2 OpenAPI document is fetchable by a plain unauthenticated `GET {apiUrl}/api/v3/api-docs/Datto-RMM` (per design "unauthenticated for the document itself"). Phase 2 fetches and commits it; if the Implementor's environment has no egress to `*.centrastage.net`, a maintainer must drop `spec/openapi.json` in place — this is the plan's single genuinely-live *input* (its reproducibility gate is still fully offline). The live refresh/diff is listed under Deferred Validation.
   - The spec is region-invariant (design §Current State): committing the `zinfandel` fetch is sufficient; `servers[].url` is irrelevant since the consumer supplies `apiUrl`.
   - Real captured sweep data is not available to an Implementor agent (it contains live secrets and needs a live account). Phase 9 therefore validates against **synthesized fixtures that deliberately encode every observed defect pattern** from the design (nullability, `udf1…udf300`, `rmmnetworkdevice`, `@class` alert contexts, epoch-ms timestamps) plus the existing committed `src/__tests__/fixtures/device*.json`. Validating the reconciled schemas against a fresh real sweep is Deferred Validation.
-  - The existing `src/__tests__/fixtures/*.json` are real device captures safe to keep (no UDF secrets observed in them); Phase 9's secret-scan will confirm.
+  - The existing `src/__tests__/fixtures/*.json` are real device captures safe to keep (no UDF secrets observed in them); Phase 9's secret-scan includes `src/__tests__/fixtures/` in its scanned roots, so this claim is mechanically confirmed over those exact files.
   - Node ≥ 20, ESM-only, server-side remain fixed (Non-Goals).
 - **Quality Bar:** Extensibility and best practices prioritized. Backwards compatibility not prioritized (explicit breaking `1.0.0`, R19).
 
@@ -542,11 +542,13 @@ Prove the generated + reconciled schemas validate against realistic captured sha
 **Requirements:** R17, R5, R7, R8, R20, R1
 
 ### Steps
-1. **Synthesized-plus-real fixtures** under `tests/fixtures/`: keep/extend the existing real `src/__tests__/fixtures/device*.json`; add per-namespace fixtures that deliberately encode the design's observed reality — a device with `udf300` set and many nulls and `deviceClass:'rmmnetworkdevice'`; an alert with each `@class` context (`comp_script_ctx`, `eventlog_ctx`, `patch_ctx`, `antivirus_ctx`, `online_offline_status_ctx`, `perf_resource_usage_ctx`); a paged collection with a malformed item to drop; timestamps as epoch-ms integers. **No real secrets** in any committed fixture.
+1. **Synthesized-plus-real fixtures** under `tests/fixtures/`: keep/extend the existing real `src/__tests__/fixtures/device*.json`; add per-namespace fixtures that deliberately encode the design's observed reality — a device with `udf300` **set to the allowlisted synthetic sentinel** (`SYNTHETIC-UDF-300`, see Step 3) and many nulls and `deviceClass:'rmmnetworkdevice'`; an alert with each `@class` context (`comp_script_ctx`, `eventlog_ctx`, `patch_ctx`, `antivirus_ctx`, `online_offline_status_ctx`, `perf_resource_usage_ctx`); a paged collection with a malformed item to drop; timestamps as epoch-ms integers. **No real secrets** in any committed fixture; every non-null `udf*` in a synthetic fixture uses the sentinel form so it exercises the leniency path without tripping the secret-scan.
    - Files: `tests/fixtures/**`
 2. **Sanitization script** `scripts/sanitize-fixtures.mjs`: given a raw sweep file, redact/synthesize secret-bearing fields (notably every `udf*`) while preserving type/nullability shape, emitting a commit-safe fixture. Documented, deterministic. (Used by a maintainer capturing real data; not run in CI against live data.)
    - Files: `scripts/sanitize-fixtures.mjs`
-3. **Secret-scan** `scripts/scan-secrets.mjs` + CI/pre-commit wiring: fail the build if any tracked file under `spec/` or `tests/fixtures/` contains a `udf*`/credential-shaped value in cleartext (heuristics: non-null `udf\d+` string values, BitLocker-key patterns, `password`/`secret` keys with values). Wire it into `prepublishOnly` and a lint-adjacent script (`"scan:secrets"`), and add a `.github` pre-commit/CI step.
+3. **Secret-scan** `scripts/scan-secrets.mjs` + CI/pre-commit wiring: fail the build if any tracked file under `spec/`, `tests/fixtures/`, **or `src/__tests__/fixtures/`** — the three committed spec+fixture roots; the last holds the retained real device captures the Assumptions promise the scan will confirm, so it must be in scope — contains a secret-shaped value in cleartext.
+   - **Heuristic, reconciled with the mandated synthetic udf fixtures** (resolves the tension between "encode a non-null `udf300`" in Step 1 and "reject cleartext udf secrets" here): a `udf\d+` value is flagged only when it looks like a real secret — a BitLocker-key/credential/high-entropy pattern — **or** it is a non-null udf string that is **not** the allowlisted synthetic sentinel. The sentinel is a documented, fixed, low-entropy marker of the form `SYNTHETIC-UDF-<n>` (e.g. `SYNTHETIC-UDF-300`); the scanner treats exactly that shape as safe. Consequently the mandated `udf300`-set leniency fixture **passes** while a planted real secret (`S3CR3T`, a BitLocker recovery key) **fails**. (Note: `sanitize-fixtures.mjs` in Step 2 redacts real-sweep udfs to null; the synthetic leniency fixtures in Step 1 instead carry the sentinel so the udf-set leniency assertion still has a non-null value to validate.)
+   - Also flag BitLocker-key patterns and `password`/`secret` keys with values anywhere in scope. Wire it into `prepublishOnly` and a lint-adjacent script (`"scan:secrets"`), and add a `.github` pre-commit/CI step.
    - Files: `scripts/scan-secrets.mjs`, `package.json` (add `"scan:secrets"`), `.github/workflows/*` (add the scan step)
 4. **Fixture-validation tests** `tests/integration/fixtures.test.ts`: parse each fixture through its reconciled schema via the resource/`parseLenient` path and assert:
    - Every fixture validates (leniency tolerates nulls/unknowns) (R5, R8, R17).
@@ -566,7 +568,7 @@ expect(validateResponse(wire).deviceClass).toBe('rmmnetworkdevice'); // not drop
 
 ### Tests (in this phase)
 - `tests/integration/fixtures.test.ts` (above).
-- `tests/unit/scripts/scan-secrets.test.ts`: the scanner flags a planted `udf5:"S3CR3T"` fixture and passes a clean one.
+- `tests/unit/scripts/scan-secrets.test.ts`: the scanner flags a planted `udf5:"S3CR3T"` fixture and a BitLocker-key-shaped value, **passes the allowlisted synthetic sentinel** (`udf300:"SYNTHETIC-UDF-300"`, proving the mandated leniency fixture clears the scan), and passes a clean fixture; it also scans `src/__tests__/fixtures/` (a planted secret there is caught).
 - `tests/unit/scripts/sanitize-fixtures.test.ts`: sanitizing a raw sample redacts `udf*` while preserving key set and null positions.
 
 ### Documentation (if needed)
@@ -579,7 +581,7 @@ npm run typecheck
 npm test
 node scripts/scan-secrets.mjs
 ```
-- The fenced block enforces both halves: `node scripts/scan-secrets.mjs` exits 0 (no secret-shaped values tracked), and the "exits non-zero on a planted secret" guarantee is asserted by `tests/unit/scripts/scan-secrets.test.ts`, which runs under `npm test` above.
+- The fenced block enforces both halves: `node scripts/scan-secrets.mjs` exits 0 (no secret-shaped values tracked across **all three** roots — `spec/`, `tests/fixtures/`, and `src/__tests__/fixtures/`, so the retained real captures the Assumptions promise to confirm are actually inspected), and the "exits non-zero on a planted secret" guarantee is asserted by `tests/unit/scripts/scan-secrets.test.ts`, which runs under `npm test` above.
 
 ---
 
