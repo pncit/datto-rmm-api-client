@@ -432,8 +432,10 @@ Provide the validated HTTP primitives every resource extends (`httpGet`/`httpPos
    - `alertContextSchema` — a permissive `@class`-tagged open object (`z.object({ '@class': z.string() }).catchall(z.unknown())` or `z.looseObject`), matching the Phase-2 spec patch.
    - `pageDetailsSchema` — the R3 cursor override: **strict on required fields/types but tolerant of extra keys** — `z.object({ count: z.number().int(), totalCount: z.number().int(), prevPageUrl: z.string().nullable(), nextPageUrl: z.string().nullable() }).catchall(z.unknown())`. Use plain `z.object(...).catchall(z.unknown())`, **not** `z.strictObject`: a failed parse **throws** and aborts the whole walk (Step 2), so rejecting an *unknown* key would hard-fail every paginated call across every namespace the moment Datto adds a benign envelope field (e.g. `pageSize`) — an added field is neither "missing" nor "malformed" (R3's actual triggers) and this would contradict the design's response-leniency philosophy. The throw is reserved for a missing/mistyped `count`/`totalCount`/`prevPageUrl`/`nextPageUrl`, never for an unknown key.
    - **Required-field marks** for the small write set (spec declares almost no `required`, so `.strict()` alone would accept an empty `device-move`/`udf-set` body): wrap each generated write-body schema marking the genuinely required fields, hand-verified against the endpoint docs, in this one place (R6).
-   - **Reconciled entity types are the single source of truth (R4/R5 alignment):** for every entity this module reconciles (`Device`, `Alert`, and any other override-touched schema), **export the public TypeScript type from the override schema's `z.infer`** (e.g. `export type Device = z.infer<typeof deviceResponseSchema>`) — *not* the raw generated type. The generated `Device`/`Alert` types describe the pre-reconciliation shape (literal `udf1…udf300` props, generated `alertContext`), which does **not** match what the resources actually validate and return (the `udfSchema` record, the open `@class` context). Resource method signatures (Phase 7/8) and the public barrel (Phase 8) use these `z.infer` types so the exported type faithfully describes the runtime value. Generated types are still used directly for entities the override module does **not** touch (and for the codemod-widened open enums, which the override schemas compose in).
-   - Files: `src/schema-overrides/index.ts` (+ e.g. `device-overrides.ts`, `alert-overrides.ts`, `pagination.ts`, `write-bodies.ts`, `types.ts` for the re-exported `z.infer` entity types)
+   - **Reconciled entity types are the single source of truth (R4/R5 alignment):** for every entity this module reconciles (`Device`, `Alert`, and any other override-touched schema), the public TypeScript type is derived **primarily from the override schema's `z.infer`** (which carries the reconciled `udfSchema` record and the open `@class` `alertContext`) — *not* the raw generated type, whose pre-reconciliation shape (literal `udf1…udf300` props, generated `alertContext`) does **not** match what the resources validate and return.
+     - **The open-enum widening must be grafted on explicitly — `z.infer` alone does not carry it.** The R5 `(string & {})` open-enum widening is a **TS-type-only** transform the Phase 2 codemod applies to `src/generated/types/**`; it has no runtime/zod representation, so `z.infer` of a composed override schema does **not** inherit it. Composing the generated zod enum yields either a **closed** union (a novel value fails to type-check — reintroducing the exact "compile-time claims an exhaustiveness the runtime relaxes" hazard R5 exists to kill) or, via `.or(z.string())`, a **collapsed plain `string`** (losing the literal members). Neither is the R5 shape. Therefore define each reconciled entity type as an **intersection that takes the enum fields from the codemod-widened generated type and everything else from `z.infer<override>`**: for a documented per-entity list of open-enum fields `ENUM_FIELDS` (e.g. `Device.deviceClass`; `Alert` fields as applicable), `export type Device = Omit<z.infer<typeof deviceResponseSchema>, 'deviceClass'> & Pick<GeneratedDevice, 'deviceClass'>` where `GeneratedDevice` is imported from `src/generated/types` (the codemod-widened `deviceClass: … | (string & {})`). This makes the exported compile-time type carry the reconciled fields **and** the open-enum widening, matching what `parseLenient`'s runtime enum degradation (Phase 4) accepts. The per-entity `ENUM_FIELDS` list is a documented constant in `types.ts`; Phase 9's enum-alignment test (using a **truly novel** value, not an existing member) guards that the graft and the runtime widening cover the same field set.
+     - Resource method signatures (Phase 7/8) and the public barrel (Phase 8) use these exported types so the exported type faithfully describes the runtime value. Generated types are still used directly (verbatim) for entities the override module does **not** touch — those already carry the codemod-widened open enums.
+   - Files: `src/schema-overrides/index.ts` (+ e.g. `device-overrides.ts`, `alert-overrides.ts`, `pagination.ts`, `write-bodies.ts`, `types.ts` for the reconciled entity types — the `z.infer` base intersected with the codemod-widened generated enum fields per `ENUM_FIELDS`)
 
 ### Opinionated Implementation Notes (Examples)
 ```ts
@@ -491,7 +493,7 @@ Implement the first five `*Resource` classes over `BaseResource`, each exposing 
 
 ### Opinionated Implementation Notes (Examples)
 ```ts
-import type { Device } from '@/schema-overrides/types'; // reconciled z.infer type, NOT the raw generated Device
+import type { Device } from '@/schema-overrides/types'; // reconciled type (z.infer base + widened generated enum graft), NOT the raw generated Device
 export class DeviceResource extends BaseResource {
   // Public `get` is safe: the base HTTP primitive is `httpGet`, so no shadowing / recursion.
   // Return type is the reconciled `Device` (udf record + open alertContext), matching what the schema validates.
@@ -603,7 +605,7 @@ Prove the generated + reconciled schemas validate against realistic captured sha
 3. **Fixture-validation tests** `tests/integration/fixtures.test.ts`: parse each fixture through its reconciled schema via the resource/`parseLenient` path and assert:
    - Every fixture validates (leniency tolerates nulls/unknowns) (R5, R8, R17).
    - The malformed collection item is dropped, the rest survive (R7).
-   - The `rmmnetworkdevice`/novel-enum fixture both **type-checks** against the codemod-widened response type **and** survives `parseLenient` without being dropped — asserting the build-time and runtime enum widening cover the same field set (Success Criteria, R5).
+   - The `rmmnetworkdevice`/novel-enum fixture both **type-checks** against the reconciled, override-derived response type **and** survives `parseLenient` without being dropped — asserting the build-time and runtime enum widening cover the same field set (Success Criteria, R5). The compile-time assertion must use a **truly novel** value (`'quantumdevice'`, not the already-declared `'rmmnetworkdevice'` member) against `Device['deviceClass']`, so it fails if the open-enum graft (Phase 6 Step 3) is missing from the override-derived type rather than passing trivially on an existing member.
    - Logging any UDF-bearing fixture through the client's masked logger never emits the raw value to the sink (R20).
 
 ### Opinionated Implementation Notes (Examples)
@@ -611,7 +613,9 @@ Prove the generated + reconciled schemas validate against realistic captured sha
 // enum-alignment assertion (compile-time + runtime in one test)
 const wire = loadFixture('device-rmmnetworkdevice.json');
 const parsed = deviceResponseSchema /* via parseLenient */;
-const dc: Device['deviceClass'] = 'rmmnetworkdevice'; // must type-check (open enum)
+// TRULY NOVEL value (not the declared 'rmmnetworkdevice' member): only type-checks if the
+// override-derived Device type carries the codemod-widened `(string & {})` graft (Phase 6 Step 3).
+const dc: Device['deviceClass'] = 'quantumdevice';
 expect(() => validateResponse(wire)).not.toThrow();
 expect(validateResponse(wire).deviceClass).toBe('rmmnetworkdevice'); // not dropped
 ```
