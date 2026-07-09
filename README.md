@@ -70,8 +70,18 @@ try {
     console.log(device.hostname, device.deviceClass);
   }
 
-  const one = await client.devices.get(devices[0]!.uid!);
-  await client.devices.setUdf(one.uid!, { udf5: "asset tag 1234" });
+  // Response validation is lenient about presence (see Validation below), so `uid` is typed
+  // `string | undefined` even though it's almost always present — handle the gap explicitly
+  // rather than force-unwrapping it.
+  const firstUid = devices[0]?.uid;
+  if (!firstUid) {
+    throw new Error("account has no devices with a uid");
+  }
+  const one = await client.devices.get(firstUid);
+  if (!one.uid) {
+    throw new Error("device has no uid");
+  }
+  await client.devices.setUdf(one.uid, { udf5: "asset tag 1234" });
 } catch (err) {
   if (err instanceof DattoApiError) {
     console.error(`Datto API error (${err.statusCode}):`, err.message);
@@ -153,6 +163,11 @@ The list vs. single/mutate split is explicit in the namespace, not the method na
 | `updateProxy(siteUid, body)`                    | POST   | `/api/v2/site/{siteUid}/settings/proxy`                        |
 | `deleteProxy(siteUid)`                          | DELETE | `/api/v2/site/{siteUid}/settings/proxy`                        |
 
+> **Unverified shape:** the sampled account used to reconcile this client's schemas had no site
+> with proxy settings configured, so `updateProxy`/`deleteProxy`'s request/response shapes are
+> validated against the committed OpenAPI spec only, not cross-checked against real captured data
+> like the rest of this table.
+
 ### `client.devices`
 
 | Method                        | HTTP | Path                                     |
@@ -214,6 +229,13 @@ collection of audit records (hence the singular namespace name).
 | `getDeviceSoftware(deviceUid, params?)` | GET  | `/api/v2/audit/device/{deviceUid}/software` (paginated) |
 | `getPrinter(deviceUid)`                 | GET  | `/api/v2/audit/printer/{deviceUid}`                     |
 | `getEsxiHost(deviceUid)`                | GET  | `/api/v2/audit/esxihost/{deviceUid}`                    |
+
+> **Unverified shapes:** `getPrinter`/`getEsxiHost` are validated against the committed OpenAPI
+> spec only — the account sampled while reconciling this client's schemas had no printer or ESXi
+> devices, so these two response shapes have not been cross-checked against real captured data the
+> way every other endpoint here has. Expect the normal response-leniency handling (unknown keys
+> stripped, enums widened) to cover any gap, but treat an unexpected field on these two responses
+> specifically as more likely than elsewhere.
 
 ### `client.filters`
 

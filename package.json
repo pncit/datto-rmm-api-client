@@ -8,7 +8,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
     "generate": "node scripts/patch-spec.mjs && orval && node scripts/dedupe-generated-index.mjs && node scripts/widen-response-enums.mjs",
