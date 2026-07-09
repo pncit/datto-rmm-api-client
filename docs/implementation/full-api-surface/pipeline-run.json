@@ -1017,6 +1017,76 @@
       },
       "session_id": "9d5ca9ea-900b-4f36-a2bd-2576ddaafb64",
       "turn": "docs/implementation/full-api-surface/review-plan/engineer-r1.md"
+    },
+    {
+      "t": 1783569888,
+      "kind": "worker",
+      "agent": "planner",
+      "label": "plan:p2 reviser r6",
+      "ok": true,
+      "started_at": "2026-07-09T03:55:21+00:00",
+      "duration_s": 566.8,
+      "api_duration_s": 550.6,
+      "turns": 45,
+      "models": [
+        "claude-haiku-4-5-20251001",
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 3.692,
+      "tokens": {
+        "input": 897,
+        "output": 40305,
+        "cache_read": 3264499,
+        "cache_creation": 102004
+      },
+      "session_id": "7837a621-63b5-4fcc-88a9-25eb846864b4",
+      "turn": "docs/implementation/full-api-surface/review-plan/reviser-r6.md"
+    },
+    {
+      "t": 1783570104,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "plan:p2 engineer r2",
+      "ok": true,
+      "started_at": "2026-07-09T04:04:48+00:00",
+      "duration_s": 215.9,
+      "api_duration_s": 203.4,
+      "turns": 13,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.0771,
+      "tokens": {
+        "input": 833,
+        "output": 13493,
+        "cache_read": 159367,
+        "cache_creation": 65592
+      },
+      "session_id": "097c615f-d949-41e3-bf08-ed9b0ce818d3",
+      "turn": "docs/implementation/full-api-surface/review-plan/engineer-r2.md"
+    },
+    {
+      "t": 1783570113,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "plan:p2 architect r2",
+      "ok": true,
+      "started_at": "2026-07-09T04:04:48+00:00",
+      "duration_s": 225.1,
+      "api_duration_s": 205.6,
+      "turns": 14,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.0406,
+      "tokens": {
+        "input": 835,
+        "output": 13013,
+        "cache_read": 156088,
+        "cache_creation": 63306
+      },
+      "session_id": "4de9b4fc-7423-4436-80c3-bec6cfa335f3",
+      "turn": "docs/implementation/full-api-surface/review-plan/architect-r2.md"
     }
   ],
   "invocation": {
