@@ -64,7 +64,7 @@ types so what TypeScript promises matches what `parseLenient` actually accepts a
 | `src/schema-overrides/write-bodies.ts` | Created | All 9 body-carrying write ops named by a Phase 5 `WriteOpKey`, reconciled: `udfWriteBodySchema`, `warrantyWriteBodySchema`, `siteCreateBodySchema`, `deviceJobCreateBodySchema`, `createSiteVariableWriteBodySchema`/`updateSiteVariableWriteBodySchema`, `createAccountVariableWriteBodySchema`/`updateAccountVariableWriteBodySchema`, `updateProxyWriteBodySchema`, each with a companion `*Input` type and the shared `requireSomeField` refinement helper |
 | `src/schema-overrides/types.ts` | Created | Reconciled `Device`/`Alert` types (the `z.infer`+open-enum-graft), pre-coerced `deviceSchema`/`alertSchema` values, `OVERRIDE_ENTITIES` registry |
 | `src/schema-overrides/index.ts` | Created | Barrel |
-| `tests/unit/client/base-resource.test.ts` | Created | Primitive/validate-method coverage, including `httpGetArray` (22 tests, nock) |
+| `tests/unit/client/base-resource.test.ts` | Created | Primitive/validate-method coverage, including `httpGetArray` (25 tests, nock) |
 | `tests/unit/client/paginate.test.ts` | Created | `paginate` walk/cursor/drop/rate-descriptor/SSRF-origin/cycle/page-cap coverage (12 tests, nock + one hand-stubbed axios instance) |
 | `tests/unit/schema-overrides/device-overrides.test.ts` | Created | `udfSchema`/`deviceResponseSchema`/`DEVICE_WIDENED_FIELDS` (10 tests) |
 | `tests/unit/schema-overrides/alert-overrides.test.ts` | Created | `alertContextSchema`/`alertResponseSchema`/`ALERT_WIDENED_FIELDS` (5 tests) |
@@ -128,8 +128,11 @@ wrapper — `udfWriteBodySchema` and the four update/settings bodies (`updateSit
 `name`; `warrantyWriteBodySchema` requires `warrantyDate` present but nullable. Every schema exports
 a companion `*Input` type derived from itself (not the raw generated body), and `types.ts` also
 exports pre-coerced `deviceSchema`/`alertSchema` values (`z.ZodType<Device>`/`z.ZodType<Alert>`) so
-a Phase 7/8 `httpGet(path, deviceSchema, ctx)` call gets the reconciled, open-enum-widened type
-without a separate `coerceSchema` call at every site.
+a Phase 7/8 `httpGet(path, deviceSchema, ctx)` call resolves to `Promise<Lenient<Device>>` — the
+reconciled, open-enum-widened shape, honestly wrapped in `Lenient<T>` — instead of the closed-enum
+`z.infer` `httpGet` would otherwise carry; a method declaring the clean `Promise<Device>` still
+re-asserts that explicitly at its own return site, without also having to fight the closed-enum
+hazard `coerceSchema` alone would leave in place.
 
 ---
 
@@ -258,7 +261,14 @@ the plan as specified.
    `schema-overrides/types.ts` now also exports pre-coerced `deviceSchema: z.ZodType<Device>` /
    `alertSchema: z.ZodType<Alert>` values (a local, same-file type-only cast — not by importing
    `coerceSchema`, which would invert this module's dependency direction relative to
-   `client/resources`), so the coerced schema is the path of least resistance and `coerceSchema`
+   `client/resources`), so the coerced schema is the path of least resistance for the closed-enum
+   hazard specifically. Found in Step B review (typescript-cop round 2): because `httpGet` (Decision
+   2/§5 Deviation 4, also landed this round) returns `Promise<Lenient<TResponse>>`, not bare
+   `Promise<TResponse>`, `this.httpGet(path, deviceSchema, ctx)` resolves to `Promise<Lenient<Device>>`,
+   not `Promise<Device>` — a Phase 7/8 method declaring the clean `Promise<Device>` still re-asserts
+   that explicitly at its own return site (the same `Lenient<T>`-to-`T` narrowing Decision 2 already
+   documents for every `http*` primitive), same as it would with any other reconciled type.
+   `deviceSchema`/`alertSchema`'s own doc comment (`types.ts`) states this precisely; `coerceSchema`
    itself remains available for any reconciled type that doesn't get one of these named exports.
 
 4. **Write-body required-field marking now covers all 9 body-carrying write operations named by a
@@ -282,7 +292,7 @@ the plan as specified.
 
 ## 7. Tests
 
-- `tests/unit/client/base-resource.test.ts` (22 tests, nock): `httpGet` tags `{kind:'read'}` and
+- `tests/unit/client/base-resource.test.ts` (25 tests, nock): `httpGet` tags `{kind:'read'}` and
   strips an unknown response key; `httpGet` forwards query params; `httpGetArray` tags
   `{kind:'read'}`, validates each item leniently, drops a malformed item rather than failing the
   whole call (R7), and forwards query params; `httpPost` bodiless sends no body and tags

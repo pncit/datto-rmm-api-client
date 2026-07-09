@@ -56,9 +56,16 @@ export type Alert = Omit<
  * `deviceResponseSchema`/`alertResponseSchema`, each typed as producing its reconciled entity type
  * ({@link Device}/{@link Alert}) directly, rather than the schema's own `z.infer` (which still
  * carries the closed, pre-graft enum types). A resource method (Phase 7/8) that writes
- * `this.httpGet(path, deviceSchema, ctx)` and declares `Promise<Device>` gets that type for free —
- * reaching for the un-coerced `deviceResponseSchema`/`alertResponseSchema` directly, which would
- * silently re-narrow the return type to closed enums, is no longer the path of least resistance.
+ * `this.httpGet(path, deviceSchema, ctx)` gets back `Promise<Lenient<Device>>` — every named field
+ * of the already-reconciled, open-enum-widened `Device` shape, additionally admitting `null`
+ * (`BaseResource.httpGet`'s own honest `Lenient<T>` return, `../client/resources/base-resource.ts`)
+ * — rather than `Promise<Lenient<{closed-enum z.infer}>>`. Reaching for the un-coerced
+ * `deviceResponseSchema`/`alertResponseSchema` directly, which would silently re-narrow that type to
+ * closed enums, is no longer the path of least resistance. A method declaring the clean
+ * `Promise<Device>` still re-asserts that explicitly at its own return site (the same
+ * `Lenient<T>`-to-`T` narrowing every `http*` primitive's caller performs — see
+ * `BaseResource.validateResponse`'s doc) — `deviceSchema`/`alertSchema` remove the closed-enum
+ * hazard from that assertion, not the assertion itself.
  *
  * This is a type-only assertion — the same cast `coerceSchema` names
  * (`../client/resources/base-resource.ts`), applied here directly rather than by importing that
