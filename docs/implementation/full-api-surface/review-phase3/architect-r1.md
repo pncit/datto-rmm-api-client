@@ -1,0 +1,28 @@
+## architect — round 1
+
+Round-1 architectural review of Phase 3 (error hierarchy, injectable UDF-masking logger, config
+schema, layer-neutral defaults). Scoped to the Phase-3 source files via `git diff main...HEAD`:
+`src/errors/{base-error,datto-api-error,datto-validation-error,index}.ts`,
+`src/logging/{logger,mask}.ts`, `src/client/datto-client-config.ts`, `src/defaults.ts`. No prior
+`architect` turn exists in this review dir, so this is a fresh exhaustive pass; I read the
+`implementation-auditor` r1/r2 and `reviser` r1 turns for context (their one finding,
+`implementation-auditor-r1-f1`, mask totality, is `Closed`/ratified and I concur — not re-raised).
+
+Overall the phase is faithful to the plan's pinned signatures, dependency direction is correct
+(`client → {defaults, logging}` downward, no cycle), and the coexistence rule holds (old surface
+untouched). Findings below concern the **logging boundary's fidelity** and **import-convention
+consistency**, both structural since `withUdfMasking` is designated the single mandatory logging
+boundary every layer threads through.
+
+Axes covered: Architecture & Boundaries, Data Model, Public API, Performance, Security. I relied on
+the two prior reviewers' stated runtime verification that `dattoLoggerSchema` (a `z.function`-based
+schema nested in `z.object`) actually rejects missing/non-function methods on the installed
+`zod@4.4.3` — I do not execute code, so I did not independently re-verify that runtime claim.
+
+## Findings
+
+| ID | Severity | Status | Category | Location | Finding | Recommendation / update |
+|----|----------|--------|----------|----------|---------|-------------------------|
+| architect-r1-f1 | Medium | Open | Boundaries | `src/logging/mask.ts:40-57` (`scrub`) | `scrub`'s object branch (`value !== null && typeof value === "object"`) treats **every** non-array object as a plain record: it allocates `out = {}` and copies only `Object.entries(value)` (own-enumerable keys). Any non-plain object placed in `meta` is therefore silently flattened to `{}` and its data destroyed — `new Date()` → `{}`, a `Map`/`Set` → `{}`, and critically an `Error` instance → `{}` (its `name`/`message`/`stack` are non-enumerable). Because `withUdfMasking` is *the single boundary every client and caller log call flows through* (design §R20, plan Step 3), and logging `meta: { err }` / `meta: { since: someDate }` is a routine call-site shape, this corrupts diagnostic output at the one place all logging converges — a correctness regression in the mandatory boundary, adjacent to the very "silent data loss" class the design forbids elsewhere. It is out of R20's scrubbing scope (design L68: "no UDF value in cleartext, not an open-ended scrubber"), but the decorator still mangles these values as a side effect of over-recursing. | Restrict recursion to plain objects and arrays only: recurse when `Array.isArray(value)` or the prototype is `Object.prototype`/`null`; return any other object (Date, Error, Map, class instance) **unchanged**. Wire-derived UDF values are JSON, i.e. always plain objects/arrays/scalars, so narrowing recursion loses no masking coverage while preserving non-plain meta values. Add a test asserting a `Date`/`Error` in `meta` survives `withUdfMasking` intact. |
+| architect-r1-f2 | Medium | Open | Boundaries | `src/client/datto-client-config.ts:3-4` | This is the **only** file in the entire `src/` tree that imports via the `@/` path alias (`@/defaults`, `@/logging/logger`); every other module — including its own Phase-3 siblings `errors/index.ts`, `errors/datto-validation-error.ts`, and `logging/mask.ts` — uses relative imports (`./base-error`, `./logger`). Mixing two import conventions in one phase (a) fragments the codebase's import style right as the pattern is being established for Phases 4-8 to copy, and (b) creates a latent publish risk: the alias resolves under `moduleResolution: "Bundler"` for typecheck, but this file is not yet re-exported from `src/index.ts` (Phase 8), so the successful `tsup` build in the notes never exercised alias rewriting in the emitted JS/`.d.ts` for it — the resolution is unproven for the published artifact. | Use relative imports here to match the whole codebase: `import { DEFAULT_RETRY, DEFAULT_TOKEN_REFRESH_PCT } from "../defaults";` and `import { dattoLoggerSchema } from "../logging/logger";`. If `@/` is intended as the go-forward convention instead, that is a deliberate cross-cutting decision to make explicitly and apply uniformly (and verify the `tsup` dts/bundle rewrites it) — not to introduce in a single incidental file. |
+| architect-r1-f3 | Low | Open | Boundaries | `src/logging/mask.ts:71-83` (`withUdfMasking`) | `wrap(logger.debug)` captures each method as a **bare, unbound function reference** and later invokes it as `fn(message, meta)`. Any logger that satisfies the public `DattoLogger` type via a class/prototype method relying on `this` (a common DI shape — a class instance, or a `pino`/`winston` wrapper object whose methods close over instance state through `this`) will have `this` lost once wrapped, breaking or crashing the injected logger. The `DattoLogger` type (`{ debug: (…) => void; … }`) admits such objects, and `dattoLoggerSchema` only checks each key is a function — nothing steers callers away from a `this`-dependent logger. `console` happens to work (Node pre-binds its methods) and arrow-function object literals work, masking the hazard. | Preserve the receiver: either bind (`wrap(logger.debug.bind(logger))` for each method) or, simpler, have each wrapper delegate through the object — e.g. capture `logger` and call `logger.debug(message, scrubbed)` inside the closure so `this` is retained. |

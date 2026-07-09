@@ -98,4 +98,28 @@ describe("withUdfMasking", () => {
       ],
     });
   });
+
+  it("never throws on a udf value JSON.stringify cannot serialize", () => {
+    const { logger, sink } = makeSink();
+    const masked = withUdfMasking(logger);
+    const circular: Record<string, unknown> = { self: null };
+    circular.self = circular;
+
+    expect(() =>
+      masked.info("non-serializable", {
+        udf1: 10n,
+        udf2: Symbol("secret"),
+        udf3: () => "secret",
+        udf4: circular,
+      }),
+    ).not.toThrow();
+
+    expect(sink).toHaveBeenCalledTimes(1);
+    const [, meta] = sink.mock.calls[0] as [string, Record<string, unknown>];
+    for (const key of ["udf1", "udf2", "udf3", "udf4"]) {
+      expect(meta[key]).toEqual(
+        expect.stringMatching(/^\[redacted - \d+ characters\]$/),
+      );
+    }
+  });
 });

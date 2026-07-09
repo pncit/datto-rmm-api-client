@@ -1,0 +1,5 @@
+## reviser — round 1
+
+| ID | Disposition | Rationale (and, for Fixed, what changed) |
+|----|-------------|-------------------------------------------|
+| implementation-auditor-r1-f1 | Fixed | Made `mask()` in `src/logging/mask.ts` total: it now tries `JSON.stringify` for non-string values and, on `undefined` (symbol/function) or a thrown `TypeError` (BigInt, circular reference), falls back to `String(value)`, which cannot throw. The logging boundary always produces a `[redacted - N characters]` placeholder instead of crashing the log call. Updated the function's JSDoc to document the totality guarantee and why it's needed (`meta` is an arbitrary caller-supplied `Record<string, unknown>`, not constrained to JSON-parsed wire values). Added a regression test in `tests/unit/logging/mask.test.ts` ("never throws on a udf value JSON.stringify cannot serialize") covering `bigint`, `symbol`, a function, and a circular object under UDF keys, asserting no throw and a redacted placeholder for each. Full suite (114 tests), typecheck, and lint pass. |

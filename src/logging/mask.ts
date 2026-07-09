@@ -7,9 +7,27 @@ const UDF_KEY = /^udf\d+$/;
  * Redacts a non-null UDF value, regardless of its wire type (string, number, nested
  * object/array). The replacement preserves the original value's length so a masked
  * log line stays diagnostically useful without ever carrying the raw value.
+ *
+ * This is a total function: it never throws. `meta` is caller-supplied and not
+ * constrained to JSON-parsed wire values, so a UDF key could carry a `bigint`,
+ * `symbol`, function, or circular object — all of which defeat `JSON.stringify`
+ * (it throws rather than serializing them). Those inputs fall back to
+ * `String(value)`, which cannot throw, so the logging boundary always redacts
+ * instead of crashing the call it's meant to protect.
  */
 function mask(value: unknown): string {
-  const asString = typeof value === "string" ? value : JSON.stringify(value);
+  if (typeof value === "string") {
+    return `[redacted - ${value.length} characters]`;
+  }
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized !== undefined) {
+      return `[redacted - ${serialized.length} characters]`;
+    }
+  } catch {
+    // Non-serializable (circular reference, BigInt, etc.) — fall through.
+  }
+  const asString = String(value);
   return `[redacted - ${asString.length} characters]`;
 }
 
