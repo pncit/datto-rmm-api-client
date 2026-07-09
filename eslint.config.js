@@ -17,9 +17,10 @@ export default [
   // Base JavaScript recommended rules
   js.configs.recommended,
 
-  // Global ignores — aligned with tsconfig.json exclude paths
+  // Global ignores — aligned with tsconfig.json exclude paths. src/generated/** mirrors
+  // fuze-api's own eslint config: generated code is never hand-fixed, so it is never linted.
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.config.js'],
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.config.js', 'src/generated/**'],
   },
 
   // TypeScript source files (excludes tests, which get a looser config below)

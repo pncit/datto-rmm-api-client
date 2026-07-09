@@ -3,8 +3,14 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": ".",
-    "types": ["vitest/globals", "node"]
+    "types": ["vitest/globals", "node"],
+    "allowJs": true
   },
-  "include": ["src/**/*.test.ts", "src/__tests__/**/*.ts", "tests/**/*.ts"],
+  "include": [
+    "src/**/*.test.ts",
+    "src/__tests__/**/*.ts",
+    "tests/**/*.ts",
+    "scripts/**/*.mjs"
+  ],
   "exclude": ["node_modules", "dist"]
 }
