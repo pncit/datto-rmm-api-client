@@ -1,0 +1,21 @@
+{
+  "alertUid": "alert-uid-perf-resource-usage",
+  "priority": "Unknown",
+  "resolved": false,
+  "muted": false,
+  "timestamp": 1721142000000,
+  "alertContext": {
+    "@class": "perf_resource_usage_ctx",
+    "metric": "cpu",
+    "thresholdPercent": 90,
+    "observedPercent": 97.5,
+    "durationMinutes": 5
+  },
+  "alertSourceInfo": {
+    "deviceUid": "device-uid-1",
+    "deviceName": "server1",
+    "siteUid": "site-uid-1",
+    "siteName": "Main Site"
+  },
+  "autoresolveMins": 30
+}

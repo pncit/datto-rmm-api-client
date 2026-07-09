@@ -1,0 +1,22 @@
+{
+  "pageDetails": {
+    "count": 2,
+    "totalCount": 2,
+    "prevPageUrl": "",
+    "nextPageUrl": ""
+  },
+  "alerts": [
+    {
+      "alertUid": "alert-uid-701",
+      "priority": "High",
+      "resolved": false,
+      "timestamp": 1721131200000
+    },
+    {
+      "alertUid": 702,
+      "priority": "Low",
+      "resolved": false,
+      "timestamp": 1721131200000
+    }
+  ]
+}
