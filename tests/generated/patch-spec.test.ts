@@ -6,12 +6,20 @@ import {
   REQUEST_RESPONSE_SPLITS,
   EXPECTED_ORPHANED_COMPONENTS,
 } from "../../scripts/patch-spec.mjs";
+import type {
+  StrictSchemaNode,
+  StrictOpenApiOperation,
+} from "./strict-fixture-types";
 
 /**
  * The same `SchemaNode`/`OpenApiSpecFragment` shape `patch-spec.mjs` and `widen-response-enums.mjs`
  * themselves are typed against (see `scripts/lib/schema-walk.mjs`), reused here rather than
  * duplicated so a real call into `patchSpec` is checked structurally against the exact type its
- * own JSDoc declares — not a second, potentially-diverging local approximation of it.
+ * own JSDoc declares — not a second, potentially-diverging local approximation of it. Every
+ * hand-written schema-node/operation value below is additionally checked against the *closed*
+ * `StrictSchemaNode`/`StrictOpenApiOperation` types (via `satisfies`) at its point of
+ * construction, so a typo'd field name is caught even though these container types stay
+ * permissive — see `./strict-fixture-types.ts`.
  */
 type SchemaNode = import("../../scripts/lib/schema-walk.mjs").SchemaNode;
 
@@ -44,7 +52,7 @@ function buildValidSpecFragment(): SpecFragment {
               },
             },
           },
-        },
+        } satisfies StrictOpenApiOperation,
       },
     },
     components: {
@@ -57,14 +65,14 @@ function buildValidSpecFragment(): SpecFragment {
             lastAuditDate: { type: "string", format: "date-time" },
             creationDate: { type: "string", format: "date-time" },
           },
-        },
+        } satisfies StrictSchemaNode,
         AuthUser: {
           type: "object",
           properties: {
             created: { type: "string", format: "date-time" },
             lastAccess: { type: "string", format: "date-time" },
           },
-        },
+        } satisfies StrictSchemaNode,
         Alert: {
           type: "object",
           properties: {
@@ -74,19 +82,19 @@ function buildValidSpecFragment(): SpecFragment {
               oneOf: [{ $ref: "#/components/schemas/SomeContext" }],
             },
           },
-        },
+        } satisfies StrictSchemaNode,
         ProxySettings: {
           type: "object",
           properties: {
             type: { type: "string", enum: ["http", "socks4", "socks5"] },
           },
-        },
+        } satisfies StrictSchemaNode,
         CreateSiteRequest: {
           type: "object",
           properties: {
             proxySettings: { $ref: "#/components/schemas/ProxySettings" },
           },
-        },
+        } satisfies StrictSchemaNode,
       },
     },
   };
@@ -119,7 +127,7 @@ describe("patchSpec", () => {
 
     for (const [schemaName, fields] of Object.entries(TIMESTAMP_FIELDS) as [
       string,
-      string[],
+      readonly string[],
     ][]) {
       for (const field of fields) {
         const prop = spec.components.schemas[schemaName].properties![field];
@@ -152,7 +160,7 @@ describe("patchSpec", () => {
     } of REQUEST_RESPONSE_SPLITS as {
       sharedSchema: string;
       requestSchema: string;
-      refLocations: string[][];
+      refLocations: readonly (readonly string[])[];
     }[]) {
       // The clone exists and matches the original shape.
       expect(spec.components.schemas[requestSchema]).toEqual(
@@ -191,7 +199,7 @@ describe("patchSpec", () => {
     const spec = buildValidSpecFragment();
     spec.components.schemas.CreateSiteRequest.properties!.proxySettings = {
       $ref: "#/components/schemas/Other",
-    };
+    } satisfies StrictSchemaNode;
 
     expect(() => patchSpec(spec)).toThrow(
       /CreateSiteRequest\.properties\.proxySettings/,
@@ -203,7 +211,7 @@ describe("patchSpec", () => {
     spec.components.schemas.Device.properties!.oddNumericField = {
       type: "number",
       pattern: "seconds.nanoseconds",
-    };
+    } satisfies StrictSchemaNode;
 
     patchSpec(spec);
 
@@ -218,7 +226,7 @@ describe("patchSpec", () => {
       type: "array",
       enum: ["device", "user"],
       items: { type: "string", enum: ["device", "user"] },
-    };
+    } satisfies StrictSchemaNode;
 
     patchSpec(spec);
 
@@ -233,7 +241,7 @@ describe("patchSpec", () => {
       type: "array",
       enum: ["device", "user"],
       items: { type: "string" },
-    };
+    } satisfies StrictSchemaNode;
 
     patchSpec(spec);
 
@@ -269,7 +277,7 @@ describe("patchSpec", () => {
           },
           "500": { description: "Internal Server Error" },
         },
-      });
+      } satisfies StrictOpenApiOperation);
 
       patchSpec(spec);
 
@@ -287,7 +295,7 @@ describe("patchSpec", () => {
             content: { "*/*": { schema: { $ref: "#/components/schemas/Device" } } },
           },
         },
-      });
+      } satisfies StrictOpenApiOperation);
 
       patchSpec(spec);
 
@@ -307,7 +315,7 @@ describe("patchSpec", () => {
             "401": { description: "Request can not be authorized." },
             "500": { description: "Internal Server Error" },
           },
-        },
+        } satisfies StrictOpenApiOperation,
       );
 
       patchSpec(spec);
@@ -323,7 +331,7 @@ describe("patchSpec", () => {
           "401": { description: "Request can not be authorized." },
           "500": { description: "Internal Server Error" },
         },
-      });
+      } satisfies StrictOpenApiOperation);
 
       expect(() => patchSpec(spec)).toThrow(/POST \/v2\/widget/);
     });
@@ -342,7 +350,7 @@ describe("patchSpec", () => {
             },
           },
         },
-      });
+      } satisfies StrictOpenApiOperation);
 
       expect(() => patchSpec(spec)).toThrow(/GET \/v2\/widget\/\{id\}/);
     });
@@ -353,16 +361,16 @@ describe("patchSpec", () => {
       const spec = buildValidSpecFragment();
       spec.components.schemas.Alert.properties!.alertContext = {
         oneOf: [{ $ref: "#/components/schemas/ActionContext" }],
-      };
+      } satisfies StrictSchemaNode;
       spec.components.schemas.ActionContext = {
         type: "object",
         allOf: [{ $ref: "#/components/schemas/AlertContext" }],
         properties: { action: { type: "string" } },
-      };
+      } satisfies StrictSchemaNode;
       spec.components.schemas.AlertContext = {
         type: "object",
         properties: { "@class": { type: "string" } },
-      };
+      } satisfies StrictSchemaNode;
       expect(EXPECTED_ORPHANED_COMPONENTS).toContain("ActionContext");
       expect(EXPECTED_ORPHANED_COMPONENTS).toContain("AlertContext");
 
@@ -376,8 +384,11 @@ describe("patchSpec", () => {
       const spec = buildValidSpecFragment();
       spec.components.schemas.Alert.properties!.alertContext = {
         oneOf: [{ $ref: "#/components/schemas/MysteryContext" }],
-      };
-      spec.components.schemas.MysteryContext = { type: "object", properties: {} };
+      } satisfies StrictSchemaNode;
+      spec.components.schemas.MysteryContext = {
+        type: "object",
+        properties: {},
+      } satisfies StrictSchemaNode;
 
       expect(() => patchSpec(spec)).toThrow(/MysteryContext/);
     });
@@ -386,11 +397,11 @@ describe("patchSpec", () => {
       const spec = buildValidSpecFragment();
       spec.components.schemas.Alert.properties!.alertContext = {
         oneOf: [{ $ref: "#/components/schemas/ActionContext" }],
-      };
+      } satisfies StrictSchemaNode;
       spec.components.schemas.ActionContext = {
         type: "object",
         properties: { action: { type: "string" } },
-      };
+      } satisfies StrictSchemaNode;
       // Also reachable via a live operation — not actually orphaned by the rewrite.
       spec.paths["/v2/widget/{id}"] = {
         get: {
@@ -401,7 +412,7 @@ describe("patchSpec", () => {
               },
             },
           },
-        },
+        } satisfies StrictOpenApiOperation,
       };
 
       patchSpec(spec);

@@ -40,8 +40,45 @@
  * }} OpenApiSpecFragment
  */
 
-/** JSON-Schema composition keywords whose array entries are themselves subschemas. */
-export const SUBSCHEMA_KEYWORDS = ["allOf", "oneOf", "anyOf"];
+/**
+ * JSON-Schema composition keywords whose array entries are themselves subschemas. Module-local:
+ * consumed only by `walkSchema` below (no other importer exists — keep it that way rather than
+ * exporting speculative public API nothing uses).
+ *
+ * @type {readonly string[]}
+ */
+const SUBSCHEMA_KEYWORDS = ["allOf", "oneOf", "anyOf"];
+
+/** OpenAPI JSON-pointer prefix for a `#/components/schemas/*` reference. */
+export const COMPONENTS_SCHEMAS_PREFIX = "#/components/schemas/";
+
+/**
+ * HTTP methods recognized as operations within an OpenAPI PathItem object. Shared by both
+ * pipeline scripts so the recognized-method set can't drift between them.
+ *
+ * @type {readonly string[]}
+ */
+export const HTTP_METHODS = [
+  "get",
+  "post",
+  "put",
+  "patch",
+  "delete",
+  "options",
+  "head",
+  "trace",
+];
+
+/**
+ * Strips the `#/components/schemas/` prefix from a component `$ref` string, e.g.
+ * `'#/components/schemas/Device'` -> `'Device'`.
+ *
+ * @param {string} ref
+ * @returns {string}
+ */
+export function refName(ref) {
+  return ref.replace(COMPONENTS_SCHEMAS_PREFIX, "");
+}
 
 /**
  * Invokes `visit(node)` once for every schema node reachable from `root` via `properties`,

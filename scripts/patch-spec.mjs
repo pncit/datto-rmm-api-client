@@ -44,26 +44,17 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { walkSchema } from "./lib/schema-walk.mjs";
+import { walkSchema, HTTP_METHODS, refName, COMPONENTS_SCHEMAS_PREFIX } from "./lib/schema-walk.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SPEC_PATH = resolve(__dirname, "../spec/openapi.json");
 const PATCHED_SPEC_PATH = resolve(__dirname, "../spec/openapi.patched.json");
 
-const HTTP_METHODS = [
-  "get",
-  "post",
-  "put",
-  "patch",
-  "delete",
-  "options",
-  "head",
-  "trace",
-];
-
 /**
  * Component-schema timestamp fields Datto's spec documents as `string`/`date-time` but that
  * are epoch-ms integers in every observed real response.
+ *
+ * @type {Readonly<Record<string, readonly string[]>>}
  */
 export const TIMESTAMP_FIELDS = {
   Device: ["lastSeen", "lastReboot", "lastAuditDate", "creationDate"],
@@ -94,6 +85,12 @@ export const TIMESTAMP_FIELDS = {
  * `CreateQuickJobRequest`/`Variable Creation Request`/`Variable Update Request`, none of which
  * are ever reached from a response), and the exact JSON-pointer-style paths (as arrays of keys)
  * to the `$ref` nodes that must be retargeted from the shared schema to the clone.
+ *
+ * @type {ReadonlyArray<{
+ *   sharedSchema: string,
+ *   requestSchema: string,
+ *   refLocations: ReadonlyArray<readonly string[]>,
+ * }>}
  */
 export const REQUEST_RESPONSE_SPLITS = [
   {
@@ -129,6 +126,8 @@ export const REQUEST_RESPONSE_SPLITS = [
  * `AlertContext`, from nowhere but those variants' own `allOf`) — deleting them removes 28 dead
  * component schemas Orval would otherwise faithfully generate and export as committed types for
  * no operation to ever reach. See `pruneOrphanedContextSchemas` for the fail-loud anchoring.
+ *
+ * @type {readonly string[]}
  */
 export const EXPECTED_ORPHANED_COMPONENTS = [
   "AlertContext",
@@ -171,6 +170,8 @@ export const EXPECTED_ORPHANED_COMPONENTS = [
  * is handled automatically (it no longer has zero schemas, so this list is never consulted for
  * it); a refresh that puts some *other*, undocumented operation into the same no-schema state
  * fails loud until that operation is reviewed and added here.
+ *
+ * @type {readonly string[]}
  */
 export const VOID_WRITE_OPERATIONS = [
   "PUT /v2/site/{siteUid}/variable",
@@ -184,10 +185,6 @@ export const VOID_WRITE_OPERATIONS = [
   "POST /v2/account/variable/{variableId}",
   "DELETE /v2/account/variable/{variableId}",
 ];
-
-function refName(ref) {
-  return ref.replace("#/components/schemas/", "");
-}
 
 function getAtPath(root, path) {
   let node = root;
@@ -266,12 +263,12 @@ function patchRequestResponseSplits(spec, missing) {
 
     for (const path of refLocations) {
       const node = getAtPath(spec, path);
-      const expectedRef = `#/components/schemas/${sharedSchema}`;
+      const expectedRef = `${COMPONENTS_SCHEMAS_PREFIX}${sharedSchema}`;
       if (!node || node.$ref !== expectedRef) {
         missing.push(`${path.join(".")} (expected $ref: ${expectedRef})`);
         continue;
       }
-      node.$ref = `#/components/schemas/${requestSchema}`;
+      node.$ref = `${COMPONENTS_SCHEMAS_PREFIX}${requestSchema}`;
     }
 
     // Clone after rewriting refLocations so the clone itself isn't touched by the rewrite above.

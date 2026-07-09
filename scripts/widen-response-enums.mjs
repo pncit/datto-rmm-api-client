@@ -76,28 +76,19 @@ import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { walkSchema } from "./lib/schema-walk.mjs";
+import { walkSchema, HTTP_METHODS, refName } from "./lib/schema-walk.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PATCHED_SPEC_PATH = resolve(__dirname, "../spec/openapi.patched.json");
 const TYPES_DIR = resolve(__dirname, "../src/generated/types");
-
-const HTTP_METHODS = [
-  "get",
-  "post",
-  "put",
-  "patch",
-  "delete",
-  "options",
-  "head",
-  "trace",
-];
 
 /**
  * Per-operation parameter/header/anonymous-body type suffixes Orval uses for request-side root
  * types. Datto's spec has no anonymous request body today (every write body is a named $ref —
  * see `computeRequestOnlyComponentNames`), but `Body` is kept for a future spec revision that
  * introduces one, and to mirror the plan's documented suffix set exactly.
+ *
+ * @type {readonly string[]}
  */
 export const REQUEST_ROOT_SUFFIXES = [
   "Body",
@@ -117,10 +108,6 @@ function toPascalCase(rawName) {
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join("");
-}
-
-function refName(ref) {
-  return ref.replace("#/components/schemas/", "");
 }
 
 /**
@@ -169,7 +156,16 @@ function schemaHasEnum(node, schemas, visitedNames) {
   return found;
 }
 
-/** Builds `{ requestReach, responseReach }`: component name -> Set of `METHOD /path` labels. */
+/**
+ * Builds `{ requestReach, responseReach }`: component name -> Set of `METHOD /path` labels.
+ *
+ * Iterates **every** content type of each operation's `requestBody` and each response — not just
+ * `application/json` — mirroring `patch-spec.mjs`'s own `computeReachableComponentNames`. The real
+ * spec genuinely uses the wildcard `*\/*` media type for some response bodies, so a guard that
+ * only inspected `application/json` would miss a request/response share (or a response-only
+ * component) reached solely through that wildcard content type, silently reintroducing the exact
+ * "which content types carry a schema" defect the rest of the pipeline is engineered to catch.
+ */
 function buildReachabilityMaps(spec) {
   const schemas = spec.components?.schemas ?? {};
   const requestReach = new Map();
@@ -192,19 +188,20 @@ function buildReachabilityMaps(spec) {
         continue;
       const opLabel = `${method.toUpperCase()} ${pathKey}`;
 
-      const requestSchema =
-        operation.requestBody?.content?.["application/json"]?.schema;
-      if (requestSchema) {
+      for (const content of Object.values(
+        operation.requestBody?.content ?? {},
+      )) {
+        if (!content?.schema) continue;
         const refs = new Set();
-        collectComponentRefs(requestSchema, schemas, refs, new Set());
+        collectComponentRefs(content.schema, schemas, refs, new Set());
         addReach(requestReach, refs, opLabel);
       }
 
       for (const response of Object.values(operation.responses ?? {})) {
-        const responseSchema = response?.content?.["application/json"]?.schema;
-        if (responseSchema) {
+        for (const content of Object.values(response?.content ?? {})) {
+          if (!content?.schema) continue;
           const refs = new Set();
-          collectComponentRefs(responseSchema, schemas, refs, new Set());
+          collectComponentRefs(content.schema, schemas, refs, new Set());
           addReach(responseReach, refs, opLabel);
         }
       }
@@ -269,7 +266,14 @@ export function verifyNoSharedEnumBearingSchemas(spec) {
 const IMPORT_RE = /import type \{([^}]+)\} from '\.\/[^']+';/g;
 const INTERFACE_NAME_RE = /export interface (\w+)/g;
 const TYPE_ALIAS_NAME_RE = /export type (\w+) =/g;
-const ENUM_ALIAS_RE = /export type (\w+) = typeof \1\[keyof typeof \1\];/g;
+// Matches both Orval's un-widened alias (`export type X = typeof X[keyof typeof X];`) and the
+// already-widened form this codemod produces (with the trailing `| (string & {})`) — the optional
+// group makes the regex match a file regardless of whether this is its first or a subsequent
+// widening pass, so a re-run over already-widened output still counts a match (see
+// `widenEnumAliasLine` and `engineer-r2-f1`: a match count keyed only on the un-widened form would
+// go to 0 on a second pass and be indistinguishable from the mechanism silently breaking).
+const ENUM_ALIAS_RE =
+  /export type (\w+) = typeof \1\[keyof typeof \1\](?: \| \(string & \{\}\))?;/g;
 
 /** Extracts this generated file's own declared type name(s) and the local names it imports. */
 function parseGeneratedFile(content) {
@@ -290,10 +294,18 @@ function parseGeneratedFile(content) {
   return { importNames, primaryNames };
 }
 
+/**
+ * Rewrites every enum-alias declaration in `content` to its widened form, returning both the
+ * result and the number of declarations matched (independent of whether the output text actually
+ * changed — see `ENUM_ALIAS_RE`). A file already in widened form still counts its matches here.
+ */
 function widenEnumAliasLine(content) {
-  return content.replace(ENUM_ALIAS_RE, (_match, name) => {
+  let matchCount = 0;
+  const widened = content.replace(ENUM_ALIAS_RE, (_match, name) => {
+    matchCount++;
     return `export type ${name} = typeof ${name}[keyof typeof ${name}] | (string & {});`;
   });
+  return { content: widened, matchCount };
 }
 
 function isRequestRootName(name, requestOnlyComponentNames) {
@@ -323,8 +335,16 @@ function expandExcludedNames(roots, nameToImports) {
  * Parses every file exactly once, returning the data both `widenGeneratedTypes` (the transform)
  * and `main`'s post-condition check need: each declared name's own imports (for transitive
  * exclusion expansion), the "root" subset of those names that are request-side by construction
- * (suffix match or in the spec-derived request-only set), and each file's own declared names (so
- * a second pass over the same files never has to re-parse them).
+ * (suffix match or in the spec-derived request-only set), each file's own declared names (so a
+ * second pass over the same files never has to re-parse them), and — independent of the suffix
+ * roots — the subset of `requestOnlyComponentNames` itself that actually resolved to some
+ * declared name in the generated tree.
+ *
+ * `rootExcludedNames` is not a reliable signal for "did the spec-derived request-only set
+ * resolve": Orval always emits per-operation `*Params` types, so `rootExcludedNames` is populated
+ * by suffix matches alone in every real run, regardless of whether `requestOnlyComponentNames`
+ * resolved to anything. `matchedRequestOnlyNames` isolates that resolution so a post-condition can
+ * check it without being masked by the ever-present suffix roots (see `verifyWideningHappened`).
  *
  * @param {Map<string, string>} fileContentsByName
  * @param {Set<string>} requestOnlyComponentNames
@@ -332,17 +352,20 @@ function expandExcludedNames(roots, nameToImports) {
  *   nameToImports: Map<string, Set<string>>,
  *   rootExcludedNames: Set<string>,
  *   primaryNamesByFile: Map<string, Set<string>>,
+ *   matchedRequestOnlyNames: Set<string>,
  * }}
  */
 export function computeRootExclusion(fileContentsByName, requestOnlyComponentNames) {
   const nameToImports = new Map();
   const rootExcludedNames = new Set();
   const primaryNamesByFile = new Map();
+  const declaredNames = new Set();
 
   for (const [fileName, content] of fileContentsByName) {
     const { importNames, primaryNames } = parseGeneratedFile(content);
     primaryNamesByFile.set(fileName, primaryNames);
     for (const name of primaryNames) {
+      declaredNames.add(name);
       nameToImports.set(name, importNames);
       if (isRequestRootName(name, requestOnlyComponentNames)) {
         rootExcludedNames.add(name);
@@ -350,19 +373,41 @@ export function computeRootExclusion(fileContentsByName, requestOnlyComponentNam
     }
   }
 
-  return { nameToImports, rootExcludedNames, primaryNamesByFile };
+  const matchedRequestOnlyNames = new Set(
+    [...requestOnlyComponentNames].filter((name) => declaredNames.has(name)),
+  );
+
+  return { nameToImports, rootExcludedNames, primaryNamesByFile, matchedRequestOnlyNames };
 }
 
-function applyWidening(fileContentsByName, primaryNamesByFile, excludedNames) {
-  const result = new Map();
+/**
+ * Applies the enum-alias widening to every non-excluded file, returning both the resulting
+ * `{ fileName -> content }` map and the total count of enum-alias declarations matched across all
+ * files — a count independent of whether any given file's content actually changed on disk, so it
+ * stays > 0 on a re-run over already-widened input (see `verifyWideningHappened`).
+ *
+ * @param {Map<string, string>} fileContentsByName
+ * @param {Map<string, Set<string>>} primaryNamesByFile
+ * @param {Set<string>} excludedNames
+ * @returns {{ files: Map<string, string>, totalMatchCount: number }}
+ */
+export function applyWidening(fileContentsByName, primaryNamesByFile, excludedNames) {
+  const files = new Map();
+  let totalMatchCount = 0;
   for (const [fileName, content] of fileContentsByName) {
     const primaryNames = primaryNamesByFile.get(fileName);
     const isExcludedFile = [...primaryNames].some((name) =>
       excludedNames.has(name),
     );
-    result.set(fileName, isExcludedFile ? content : widenEnumAliasLine(content));
+    if (isExcludedFile) {
+      files.set(fileName, content);
+      continue;
+    }
+    const { content: widened, matchCount } = widenEnumAliasLine(content);
+    files.set(fileName, widened);
+    totalMatchCount += matchCount;
   }
-  return result;
+  return { files, totalMatchCount };
 }
 
 /**
@@ -382,7 +427,7 @@ export function widenGeneratedTypes(
   const { nameToImports, rootExcludedNames, primaryNamesByFile } =
     computeRootExclusion(fileContentsByName, requestOnlyComponentNames);
   const excluded = expandExcludedNames(rootExcludedNames, nameToImports);
-  return applyWidening(fileContentsByName, primaryNamesByFile, excluded);
+  return applyWidening(fileContentsByName, primaryNamesByFile, excluded).files;
 }
 
 function walkTsFiles(dir) {
@@ -407,13 +452,21 @@ function walkTsFiles(dir) {
  *
  *  - If any named component schema reachable from a response carries an enum (directly or
  *    nested) — which `verifyNoSharedEnumBearingSchemas` already proves cannot also be reachable
- *    from a request — at least one generated file must have been widened. Catches a future
- *    Orval/formatter change that makes `ENUM_ALIAS_RE`/`IMPORT_RE` silently stop matching:
- *    `changedCount` would otherwise stay 0 with no other symptom.
+ *    from a request — at least one enum-alias declaration must have been matched by the widening
+ *    pass. Catches a future Orval/formatter change that makes `ENUM_ALIAS_RE`/`IMPORT_RE` silently
+ *    stop matching: `widenedMatchCount` would otherwise stay 0 with no other symptom. This is
+ *    keyed on the widening pass's own match count, not on how many files changed on disk — the
+ *    transform is idempotent (`ENUM_ALIAS_RE` matches both the un-widened and already-widened
+ *    form), so a re-run over already-widened output still matches every alias declaration even
+ *    though it writes nothing.
  *  - If the spec-derived request-only-component set is non-empty, at least one of those names
  *    must have resolved to a declared name in some generated file. Catches a mismatch between
  *    `computeRequestOnlyComponentNames`'s PascalCasing and Orval's actual naming (the
- *    discrimination graph silently excluding nothing it was supposed to).
+ *    discrimination graph silently excluding nothing it was supposed to). This is checked via
+ *    `matchedRequestOnlyNames` (the resolved subset of `requestOnlyComponentNames` itself), not
+ *    `rootExcludedNames` — Orval always emits per-operation `*Params` types, so `rootExcludedNames`
+ *    is never empty in a real run regardless of whether the request-only set resolved to anything,
+ *    which would make a check keyed on it vacuous for the exact drift it's meant to catch.
  *
  * This does not, and cannot without reimplementing Orval's exact naming algorithm, prove every
  * individual response enum was widened and every individual request enum was excluded — it
@@ -422,30 +475,30 @@ function walkTsFiles(dir) {
  *
  * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
  * @param {Set<string>} requestOnlyComponentNames
- * @param {Set<string>} rootExcludedNames
- * @param {number} changedCount
+ * @param {Set<string>} matchedRequestOnlyNames
+ * @param {number} widenedMatchCount
  * @returns {void}
  */
 export function verifyWideningHappened(
   spec,
   requestOnlyComponentNames,
-  rootExcludedNames,
-  changedCount,
+  matchedRequestOnlyNames,
+  widenedMatchCount,
 ) {
   const schemas = spec.components?.schemas ?? {};
   const { responseReach } = buildReachabilityMaps(spec);
   const hasResponseEnum = [...responseReach.keys()].some((name) =>
     componentHasEnum(name, schemas, new Set()),
   );
-  if (hasResponseEnum && changedCount === 0) {
+  if (hasResponseEnum && widenedMatchCount === 0) {
     throw new Error(
       "widen-response-enums: the patched spec has at least one response-reachable, enum-bearing " +
-        "component schema, but 0 generated files were widened — ENUM_ALIAS_RE/IMPORT_RE likely no " +
-        "longer match Orval's generated output shape",
+        "component schema, but 0 enum-alias declarations were widened — ENUM_ALIAS_RE/IMPORT_RE " +
+        "likely no longer match Orval's generated output shape",
     );
   }
 
-  if (requestOnlyComponentNames.size > 0 && rootExcludedNames.size === 0) {
+  if (requestOnlyComponentNames.size > 0 && matchedRequestOnlyNames.size === 0) {
     throw new Error(
       "widen-response-enums: the patched spec has request-only component schema(s) " +
         `(${[...requestOnlyComponentNames].sort().join(", ")}), but none resolved to a declared ` +
@@ -470,10 +523,14 @@ function main() {
     ]),
   );
 
-  const { nameToImports, rootExcludedNames, primaryNamesByFile } =
+  const { nameToImports, rootExcludedNames, primaryNamesByFile, matchedRequestOnlyNames } =
     computeRootExclusion(fileContentsByName, requestOnlyComponentNames);
   const excluded = expandExcludedNames(rootExcludedNames, nameToImports);
-  const widened = applyWidening(fileContentsByName, primaryNamesByFile, excluded);
+  const { files: widened, totalMatchCount } = applyWidening(
+    fileContentsByName,
+    primaryNamesByFile,
+    excluded,
+  );
 
   let changedCount = 0;
   for (const [relPath, content] of widened) {
@@ -486,8 +543,8 @@ function main() {
   verifyWideningHappened(
     patchedSpec,
     requestOnlyComponentNames,
-    rootExcludedNames,
-    changedCount,
+    matchedRequestOnlyNames,
+    totalMatchCount,
   );
 
   console.log(

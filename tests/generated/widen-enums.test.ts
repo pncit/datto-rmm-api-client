@@ -2,10 +2,16 @@ import { describe, test, expect } from "vitest";
 
 import {
   widenGeneratedTypes,
+  applyWidening,
+  computeRootExclusion,
   computeRequestOnlyComponentNames,
   verifyNoSharedEnumBearingSchemas,
   verifyWideningHappened,
 } from "../../scripts/widen-response-enums.mjs";
+import type {
+  StrictSchemaNode,
+  StrictOpenApiOperation,
+} from "./strict-fixture-types";
 
 function enumFile(name: string, members: string[]) {
   const body = members.map((m) => `  ${m}: '${m}',`).join("\n");
@@ -133,13 +139,104 @@ describe("widenGeneratedTypes", () => {
   });
 });
 
+describe("applyWidening", () => {
+  test("totalMatchCount stays > 0 when re-applied to already-widened content (a re-run over already-widened output is a legitimate no-op, not a silent widening failure)", () => {
+    const files = new Map([
+      ["deviceDeviceClass.ts", enumFile("DeviceDeviceClass", ["device", "printer"])],
+    ]);
+    const primaryNamesByFile = new Map([
+      ["deviceDeviceClass.ts", new Set(["DeviceDeviceClass"])],
+    ]);
+
+    const first = applyWidening(files, primaryNamesByFile, new Set());
+    expect(first.totalMatchCount).toBe(1);
+    expect(first.files.get("deviceDeviceClass.ts")).toContain("| (string & {})");
+
+    // Simulate a second `main()` invocation over the already-widened file (e.g. no
+    // `output.clean: true` regeneration in between): the match count must stay > 0, not drop to
+    // 0, so `verifyWideningHappened`'s post-condition doesn't mistake this legitimate idempotent
+    // no-op for the widening mechanism silently failing to engage (engineer-r2-f1).
+    const second = applyWidening(first.files, primaryNamesByFile, new Set());
+    expect(second.totalMatchCount).toBe(1);
+    expect(second.files.get("deviceDeviceClass.ts")).toBe(
+      first.files.get("deviceDeviceClass.ts"),
+    );
+  });
+
+  test("totalMatchCount is 0 for a file excluded from widening (a request-side enum)", () => {
+    const files = new Map([
+      ["warrantyLevel.ts", enumFile("WarrantyLevel", ["bronze", "gold"])],
+    ]);
+    const primaryNamesByFile = new Map([
+      ["warrantyLevel.ts", new Set(["WarrantyLevel"])],
+    ]);
+
+    const { totalMatchCount, files: result } = applyWidening(
+      files,
+      primaryNamesByFile,
+      new Set(["WarrantyLevel"]),
+    );
+
+    expect(totalMatchCount).toBe(0);
+    expect(result.get("warrantyLevel.ts")).toBe(files.get("warrantyLevel.ts"));
+  });
+});
+
+describe("computeRootExclusion", () => {
+  test("matchedRequestOnlyNames stays empty when a request-only name fails to resolve, independent of the ever-present *Params suffix roots", () => {
+    // A realistic run always has at least one `*Params` file (Orval emits one per operation), so
+    // `rootExcludedNames` is never empty — but that must not mask a genuine failure of the
+    // spec-derived request-only name to resolve to any declared type (architect-r2-f2).
+    const files = new Map([
+      [
+        "listWidgetsParams.ts",
+        ["export type ListWidgetsParams = {", "  order?: string;", "};", ""].join(
+          "\n",
+        ),
+      ],
+    ]);
+
+    const { rootExcludedNames, matchedRequestOnlyNames } = computeRootExclusion(
+      files,
+      new Set(["Warranty"]),
+    );
+
+    expect(rootExcludedNames.size).toBeGreaterThan(0);
+    expect(matchedRequestOnlyNames.size).toBe(0);
+  });
+
+  test("matchedRequestOnlyNames includes a request-only name that resolves to a declared type, alongside unrelated suffix roots", () => {
+    const files = new Map([
+      [
+        "listWidgetsParams.ts",
+        ["export type ListWidgetsParams = {", "  order?: string;", "};", ""].join(
+          "\n",
+        ),
+      ],
+      [
+        "warranty.ts",
+        ["export interface Warranty {", "  level?: string;", "}", ""].join("\n"),
+      ],
+    ]);
+
+    const { matchedRequestOnlyNames } = computeRootExclusion(
+      files,
+      new Set(["Warranty"]),
+    );
+
+    expect(matchedRequestOnlyNames).toEqual(new Set(["Warranty"]));
+  });
+});
+
 describe("computeRequestOnlyComponentNames", () => {
   function specWith({
     requestRef,
     alsoInResponse,
+    contentType = "application/json",
   }: {
     requestRef: string;
     alsoInResponse: boolean;
+    contentType?: string;
   }) {
     return {
       paths: {
@@ -147,7 +244,7 @@ describe("computeRequestOnlyComponentNames", () => {
           post: {
             requestBody: {
               content: {
-                "application/json": {
+                [contentType]: {
                   schema: { $ref: `#/components/schemas/${requestRef}` },
                 },
               },
@@ -157,7 +254,7 @@ describe("computeRequestOnlyComponentNames", () => {
                 content: { "application/json": { schema: { type: "object" } } },
               },
             },
-          },
+          } satisfies StrictOpenApiOperation,
         },
         ...(alsoInResponse
           ? {
@@ -166,7 +263,7 @@ describe("computeRequestOnlyComponentNames", () => {
                   responses: {
                     "200": {
                       content: {
-                        "application/json": {
+                        [contentType]: {
                           schema: {
                             $ref: `#/components/schemas/${requestRef}`,
                           },
@@ -174,13 +271,15 @@ describe("computeRequestOnlyComponentNames", () => {
                       },
                     },
                   },
-                },
+                } satisfies StrictOpenApiOperation,
               },
             }
           : {}),
       },
       components: {
-        schemas: { [requestRef]: { type: "object", properties: {} } },
+        schemas: {
+          [requestRef]: { type: "object", properties: {} } satisfies StrictSchemaNode,
+        },
       },
     };
   }
@@ -206,6 +305,18 @@ describe("computeRequestOnlyComponentNames", () => {
       new Set(["VariableCreationRequest"]),
     );
   });
+
+  test("excludes a component reachable from both a requestBody and a response delivered only via '*/*' (not just application/json)", () => {
+    // architect-r2-f1: the real spec genuinely uses '*/*' for some response bodies; the
+    // reachability walker must consider every content type, not just application/json, or a
+    // response-only-via-'*/*' component would be misclassified as request-only.
+    const spec = specWith({
+      requestRef: "Udf",
+      alsoInResponse: true,
+      contentType: "*/*",
+    });
+    expect(computeRequestOnlyComponentNames(spec)).toEqual(new Set());
+  });
 });
 
 describe("verifyNoSharedEnumBearingSchemas", () => {
@@ -221,7 +332,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
                 },
               },
             },
-          },
+          } satisfies StrictOpenApiOperation,
         },
         "/site": {
           get: {
@@ -234,7 +345,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
                 },
               },
             },
-          },
+          } satisfies StrictOpenApiOperation,
         },
       },
       components: {
@@ -242,7 +353,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
           ProxySettings: {
             type: "object",
             properties: { type: { type: "string", enum: ["http", "socks4"] } },
-          },
+          } satisfies StrictSchemaNode,
         },
       },
     };
@@ -268,7 +379,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
                 },
               },
             },
-          },
+          } satisfies StrictOpenApiOperation,
           get: {
             responses: {
               "200": {
@@ -279,7 +390,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
                 },
               },
             },
-          },
+          } satisfies StrictOpenApiOperation,
         },
       },
       components: {
@@ -289,11 +400,56 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
             properties: {
               proxySettings: { $ref: "#/components/schemas/ProxySettings" },
             },
-          },
+          } satisfies StrictSchemaNode,
           ProxySettings: {
             type: "object",
             properties: { type: { type: "string", enum: ["http", "socks4"] } },
-          },
+          } satisfies StrictSchemaNode,
+        },
+      },
+    };
+
+    expect(() => verifyNoSharedEnumBearingSchemas(spec)).toThrow(
+      /ProxySettings/,
+    );
+  });
+
+  test("throws when a response's enum-bearing schema is delivered only via '*/*' content type", () => {
+    // architect-r2-f1 regression: the shared-schema guard must consider every content type, not
+    // just application/json, since the real spec genuinely uses '*/*' for some responses.
+    const spec = {
+      paths: {
+        "/proxy": {
+          post: {
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ProxySettings" },
+                },
+              },
+            },
+          } satisfies StrictOpenApiOperation,
+        },
+        "/site": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "*/*": {
+                    schema: { $ref: "#/components/schemas/ProxySettings" },
+                  },
+                },
+              },
+            },
+          } satisfies StrictOpenApiOperation,
+        },
+      },
+      components: {
+        schemas: {
+          ProxySettings: {
+            type: "object",
+            properties: { type: { type: "string", enum: ["http", "socks4"] } },
+          } satisfies StrictSchemaNode,
         },
       },
     };
@@ -315,7 +471,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
                 },
               },
             },
-          },
+          } satisfies StrictOpenApiOperation,
         },
         "/job": {
           get: {
@@ -330,7 +486,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
                 },
               },
             },
-          },
+          } satisfies StrictOpenApiOperation,
         },
       },
       components: {
@@ -338,7 +494,7 @@ describe("verifyNoSharedEnumBearingSchemas", () => {
           JobComponentVariable: {
             type: "object",
             properties: { name: { type: "string" }, value: { type: "string" } },
-          },
+          } satisfies StrictSchemaNode,
         },
       },
     };
@@ -359,7 +515,7 @@ describe("verifyWideningHappened", () => {
               },
             },
           },
-        },
+        } satisfies StrictOpenApiOperation,
       },
     },
     components: {
@@ -367,24 +523,24 @@ describe("verifyWideningHappened", () => {
         Device: {
           type: "object",
           properties: { deviceClass: { type: "string", enum: ["device", "printer"] } },
-        },
+        } satisfies StrictSchemaNode,
       },
     },
   };
 
-  test("throws when the spec has a response-reachable enum-bearing schema but 0 files were widened", () => {
+  test("throws when the spec has a response-reachable enum-bearing schema but 0 enum-alias declarations were widened", () => {
     expect(() =>
       verifyWideningHappened(specWithResponseEnum, new Set(), new Set(), 0),
-    ).toThrow(/0 generated files were widened/);
+    ).toThrow(/0 enum-alias declarations were widened/);
   });
 
-  test("does not throw when at least one file was widened for a spec with a response enum", () => {
+  test("does not throw when at least one enum-alias declaration was widened for a spec with a response enum", () => {
     expect(() =>
       verifyWideningHappened(specWithResponseEnum, new Set(), new Set(), 1),
     ).not.toThrow();
   });
 
-  test("does not throw for a spec with no response-reachable enum at all, even if changedCount is 0", () => {
+  test("does not throw for a spec with no response-reachable enum at all, even if the widened match count is 0", () => {
     const specWithoutEnum = {
       paths: {
         "/device/{id}": {
@@ -396,12 +552,12 @@ describe("verifyWideningHappened", () => {
                 },
               },
             },
-          },
+          } satisfies StrictOpenApiOperation,
         },
       },
       components: {
         schemas: {
-          Device: { type: "object", properties: { name: { type: "string" } } },
+          Device: { type: "object", properties: { name: { type: "string" } } } satisfies StrictSchemaNode,
         },
       },
     };
@@ -411,7 +567,7 @@ describe("verifyWideningHappened", () => {
     ).not.toThrow();
   });
 
-  test("throws when the spec has request-only components but none resolved to an excluded declared name", () => {
+  test("throws when the spec has request-only components but none resolved to a matched declared name", () => {
     expect(() =>
       verifyWideningHappened(
         specWithResponseEnum,
@@ -422,7 +578,7 @@ describe("verifyWideningHappened", () => {
     ).toThrow(/Warranty/);
   });
 
-  test("does not throw when the spec's request-only components resolved to at least one excluded name", () => {
+  test("does not throw when the spec's request-only components resolved to at least one matched name", () => {
     expect(() =>
       verifyWideningHappened(
         specWithResponseEnum,
