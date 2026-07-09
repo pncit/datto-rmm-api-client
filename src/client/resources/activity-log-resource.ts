@@ -17,7 +17,11 @@ import { narrow } from "./narrow";
  * (`ActivityLogEntity | (string & {})`) while this hand-written schema's `z.enum([...])` is
  * authored closed — the same compile-time/runtime asymmetry `filter-schema.ts`'s `filterSchema`
  * documents for `Filter["type"]` — so `tests/generated/schema-mirror-pin.ts` pins this schema
- * against `ActivityLog` by key-set equality only, not full structural equality.
+ * against `ActivityLog` with **two** pins: a `keyof` pin over `entity` by key-set equality only
+ * (so the enum field's presence/absence is still checked without a doomed-to-fail literal-enum
+ * comparison), plus a full structural `Omit<ActivityLog, "entity">` pin covering every other
+ * field — including the nested `site`/`user` objects and scalar types — which, unlike key-set
+ * equality, also fails if a same-named field's type changes.
  *
  * @internal Exported only so `tests/generated/schema-mirror-pin.ts` can pin it against
  * `ActivityLog` — not resource API. The `src/index.ts` barrel must never `export *` from this

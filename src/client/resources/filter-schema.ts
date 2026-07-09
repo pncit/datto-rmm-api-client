@@ -21,7 +21,10 @@ import { z } from "zod";
  * compile-time asymmetry this creates — `Filter["type"]` is codemod-widened to
  * `FilterType | (string & {})` in the generated type, while this hand-written schema's
  * `z.enum([...])` is authored closed — is why `tests/generated/schema-mirror-pin.ts` pins this
- * schema against `Filter` by key-set equality only, not full structural equality.)
+ * schema against `Filter` with **two** pins: a `keyof` pin over `type` by key-set equality only
+ * (so the enum field's presence/absence is still checked without a doomed-to-fail literal-enum
+ * comparison), plus a full structural `Omit<Filter, "type">` pin covering every other field, which
+ * — unlike key-set equality — also fails if a same-named field's type changes.)
  *
  * @internal Exported only so `tests/generated/schema-mirror-pin.ts` can pin it against `Filter` —
  * not resource API. The `src/index.ts` barrel must never `export *` from this module.
