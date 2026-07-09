@@ -6487,6 +6487,29 @@
       "phase": 10,
       "attempt": 1,
       "result": "pass"
+    },
+    {
+      "t": 1783630677,
+      "kind": "worker",
+      "agent": "process-historian",
+      "label": "implementation historian",
+      "ok": true,
+      "started_at": "2026-07-09T20:53:55+00:00",
+      "duration_s": 242.4,
+      "api_duration_s": 223.5,
+      "turns": 18,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.818,
+      "tokens": {
+        "input": 1081,
+        "output": 12575,
+        "cache_read": 673767,
+        "cache_creation": 116132
+      },
+      "session_id": "bdebcd89-8ead-4c87-9669-76d6aafbdc36",
+      "turn": "docs/implementation/full-api-surface/implementation-artifact.md"
     }
   ],
   "invocation": {
