@@ -16,17 +16,21 @@
  * otherwise silently drop or mis-coerce that field at runtime while the declared return type still
  * claims the old shape, undetected by any test or the typechecker. This file is that guard.
  *
- * **Full structural equality for most, key-set equality for the two enum-bearing mirrors:** a
- * naive `Equal<z.infer<typeof schema>, T>` pin would fail *today*, independent of any future
- * drift, for `Filter`/`filterSchema` and `ActivityLog`/`activityLogSchema` — the
- * response-enum-widening codemod (Phase 2) widens `Filter["type"]` and `ActivityLog["entity"]` to
- * `EnumUnion | (string & {})`, while each hand-written schema's `z.enum([...])` is authored
- * closed; the widening that reconciles the two happens only at runtime (`parseLenient`'s
- * recursive walk over the schema tree, Phase 4), which does not change `z.infer`'s compile-time
- * result. That open-enum/closed-enum asymmetry is already covered generically for every entity by
- * `Lenient<T>` and `lenient-type-pin.ts`, so re-proving it per schema here would be redundant —
- * `Filter` and `ActivityLog` alone use the weaker key-set-only comparison, scoped to that one
- * documented asymmetry. Every other mirror (`Component`, `DnetSiteMappingsDto`,
+ * **Full structural equality for every mirror, split around the one enum field for the two
+ * enum-bearing mirrors:** a naive `Equal<z.infer<typeof schema>, T>` pin would fail *today*,
+ * independent of any future drift, for `Filter`/`filterSchema` and `ActivityLog`/
+ * `activityLogSchema` — the response-enum-widening codemod (Phase 2) widens `Filter["type"]` and
+ * `ActivityLog["entity"]` to `EnumUnion | (string & {})`, while each hand-written schema's
+ * `z.enum([...])` is authored closed; the widening that reconciles the two happens only at
+ * runtime (`parseLenient`'s recursive walk over the schema tree, Phase 4), which does not change
+ * `z.infer`'s compile-time result. That open-enum/closed-enum asymmetry is already covered
+ * generically for every entity by `Lenient<T>` and `lenient-type-pin.ts`, so re-proving it per
+ * schema here would be redundant. `Filter` and `ActivityLog` therefore each get **two** pins: a
+ * `keyof` pin covering the one enum field (so a field being added to or removed from either side
+ * still fails), plus an `Omit<…, "type" | "entity">` full-structural pin covering every other
+ * field — including, for `ActivityLog`, the two nested object fields (`site`, `user`) and the
+ * scalar types (`date`, `deviceId`, `hasStdOut`, `hasStdErr`) a bare key-set comparison would
+ * never inspect. Every other mirror (`Component`, `DnetSiteMappingsDto`,
  * `DeviceNetworkInterface`, `JobComponent`, `Variable`, `Software`, `AuthUser`) carries no enum
  * field at all (verified against their generated types, including every nested object —
  * `ComponentVariable`, `NetworkInterface`, `DevicesType`, `JobComponentVariable`), so each of those
@@ -88,12 +92,26 @@ type _Variable = Expect<Equal<Variable, z.infer<typeof variableSchema>>>;
 type _Software = Expect<Equal<Software, z.infer<typeof softwareSchema>>>;
 type _AuthUser = Expect<Equal<AuthUser, z.infer<typeof authUserSchema>>>;
 
-// `Filter`/`filterSchema` and `ActivityLog`/`activityLogSchema` stay key-set-only (see the file
-// doc's Phase-2 enum-widening asymmetry) — a field added to or removed from either side fails
-// `npm run typecheck`.
+// `Filter`/`filterSchema` and `ActivityLog`/`activityLogSchema` get a `keyof` pin for the one
+// enum field each carries (see the file doc's Phase-2 enum-widening asymmetry) — a field added
+// to or removed from either side fails `npm run typecheck` — plus a full structural pin over
+// every other field, so a same-named field's type changing (nested object shape, scalar type)
+// fails too, not just presence/absence.
 type _FilterKeys = Expect<
   Equal<keyof Filter, keyof z.infer<typeof filterSchema>>
 >;
+type _Filter = Expect<
+  Equal<
+    Omit<Filter, "type">,
+    Omit<z.infer<typeof filterSchema>, "type">
+  >
+>;
 type _ActivityLogKeys = Expect<
   Equal<keyof ActivityLog, keyof z.infer<typeof activityLogSchema>>
+>;
+type _ActivityLog = Expect<
+  Equal<
+    Omit<ActivityLog, "entity">,
+    Omit<z.infer<typeof activityLogSchema>, "entity">
+  >
 >;

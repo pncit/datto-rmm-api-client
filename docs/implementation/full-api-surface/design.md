@@ -450,8 +450,10 @@ Namespaces and their groups: `account`, `sites`, `devices`, `alerts`, `jobs`, `a
 `users`, `activityLogs`); **singular** for the genuine singletons `account` and `system`, and for
 `audit`, which is a group of audit-*fetch* operations (each returns the audit for one
 device/printer/ESXi host) rather than a collection of audit records. `src/index.ts` exports
-`createDattoRmmClient`, `DattoRmmClient`, the config and logger types, the error classes, and the
-generated types.
+`createDattoRmmClient`, `DattoRmmClient`, the config and logger types, and the error classes,
+plus a **curated subset** of entity/response types re-exported **by name** from the
+hand-maintained `src/public-types.ts` — never a wildcard re-export of the generated types (see
+`plan.md:543-544` for the rationale and the curation mechanism).
 
 ## Migration Strategy
 
@@ -476,6 +478,19 @@ Sequence (phase boundaries for the Planner, not prescriptions):
 - **Every public method changes.** `getAccountDevices` / `getDeviceByUid` / `updateDeviceUdfs` are
   removed in favor of namespaced operations (Decision 5); `updateDeviceUdfs`'s endpoint is also
   corrected.
+- **`invalidateToken` is removed with no public replacement.** The `0.1.x` flat client exposed a
+  fourth public method, `invalidateToken()` ("drops the cached access token, forcing a refresh on
+  the next request"), that this rebuild does not carry forward as a namespaced operation.
+  Proactive, caller-triggered invalidation is now reachable only through the internal
+  `AuthManager.invalidate()`, wired solely to the automatic 401 `onUnauthorized` hook (Phase 5/7)
+  — there is no `client.<namespace>.invalidateToken()` equivalent. This is an **unintentional
+  capability gap**, not a deliberate design decision: no Decision in this document retires the
+  capability on purpose, and the automatic 401 handling it was folded into serves a different case
+  (reacting to an already-expired token) than the one `invalidateToken` served (proactively
+  forcing a refresh after rotating `apiSecret` while a long-running process keeps its client
+  instance). Phase 10's README migration guide (R18) must call this out explicitly as a dropped
+  capability with no replacement, rather than silently omitting it; a public replacement, if
+  wanted, is future work outside this rebuild's scope.
 - **Error contract changes** from returned `Result<T>` to thrown `DattoApiError` /
   `DattoValidationError` (Decision 4); the `Result`/`ProblemError` exports are removed.
 - **Validation-mode config removed** (`strict | warn | off`); response leniency is the model (R5).

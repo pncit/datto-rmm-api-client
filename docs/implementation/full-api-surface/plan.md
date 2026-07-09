@@ -528,7 +528,7 @@ npm test
 ## Phase 8: Resource namespaces II (audit, filters, users, activityLogs, system), client finalize, and old-surface removal
 
 ### Goal
-Implement the remaining five namespaces, finalize `DattoRmmClient` with all ten mounted, rewrite `src/index.ts` to the new public surface (`createDattoRmmClient`, `DattoRmmClient`, config/logger types, error classes, generated types), and **delete the entire old surface** in the same commit. After this phase every one of the 53 paths / 57 operations is reachable via `client.<resource>.<operation>()` and the package no longer exports `Result`/`ProblemError`/the three 0.1.x methods (R19).
+Implement the remaining five namespaces, finalize `DattoRmmClient` with all ten mounted, rewrite `src/index.ts` to the new public surface (`createDattoRmmClient`, `DattoRmmClient`, config/logger types, error classes, generated types), and **delete the entire old surface** in the same commit. After this phase every one of the 53 paths / 57 operations is reachable via `client.<resource>.<operation>()` and the package no longer exports `Result`/`ProblemError`/the four 0.1.x methods (`getAccountDevices`, `getDeviceByUid`, `updateDeviceUdfs`, `invalidateToken`) (R19).
 
 **Requirements:** R1, R2, R19
 
