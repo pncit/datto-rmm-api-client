@@ -28,15 +28,17 @@
 - The old runtime surface (`src/client.ts`, `src/config.ts`, `src/auth.ts`, `src/httpClient.ts`,
   `src/rateLimiter.ts`, `src/tokenStore.ts`, `src/validation.ts`, `src/schemas.ts`,
   `src/logger.ts`, `src/result.ts`, `src/internal/`) — untouched, still compiling.
-- Phase 5's `src/rate-limit/rate-limits.ts` (`WRITE_LIMITS` table) — untouched. One real write
-  operation (`POST /api/v2/site/{siteUid}`, site update) has no corresponding `WriteOpKey` and is
-  therefore not implemented this phase; see §5/§11.
-- Two exceptions, both necessary and minimal, documented fully in §5:
+- Three exceptions, all necessary and minimal, documented fully in §5:
   - `src/client/datto-client-config.ts` — one doc-comment correction (stale "wired in Phase 8"
     forward reference; `DattoRmmClient` is wired in this phase).
   - `src/validation/schema-leniency.ts` (a Phase 4 file) — one small, targeted bug fix required
     for `AlertResource` to actually deliver R8's `alertContext` guarantee at runtime; not a
     refactor, not a Phase 4 re-litigation.
+  - `src/rate-limit/rate-limits.ts` (a Phase 5 file) — added the `'site-update'` `WriteOpKey`/
+    `WRITE_LIMITS` entry so `SiteResource.update()` (a named Phase 7 deliverable) has a rate
+    ceiling to tag; the table's own doc names this as its expected extension point, not a
+    boundary violation of the coexistence rule. `src/schema-overrides/write-bodies.ts` (Phase 6)
+    was extended in step with it to export `siteUpdateBodySchema`.
 
 ---
 
@@ -58,7 +60,7 @@ the three retired 0.1.x methods' exact pinned replacements (design Decision 5):
 | File | Change Type | Rationale |
 |------|------------|-----------|
 | `src/client/resources/account-resource.ts` | Created | `AccountResource`: `get`, `devices`, `variables`, `createVariable`/`updateVariable`/`deleteVariable`, `components`, `dnetSiteMappings` |
-| `src/client/resources/site-resource.ts` | Created | `SiteResource`: `list`, `get`, `create`, `devices`, `devicesWithNetworkInterface`, `variables`, `createVariable`/`updateVariable`/`deleteVariable`, `settings`, `deviceFilters`, `updateProxy`/`deleteProxy` |
+| `src/client/resources/site-resource.ts` | Created | `SiteResource`: `list`, `get`, `create`, `update`, `devices`, `devicesWithNetworkInterface`, `variables`, `createVariable`/`updateVariable`/`deleteVariable`, `settings`, `deviceFilters`, `updateProxy`/`deleteProxy` |
 | `src/client/resources/device-resource.ts` | Created | `DeviceResource`: `get`, `getById`, `getByMacAddress`, `move`, `createJob`, `setUdf`, `setWarranty` |
 | `src/client/resources/alert-resource.ts` | Created | `AlertResource`: `get`, `resolve`, `mute`, `unmute`, `open`/`resolved`/`openForSite`/`resolvedForSite`/`openForDevice`/`resolvedForDevice` |
 | `src/client/resources/job-resource.ts` | Created | `JobResource`: `get`, `getResults`, `getStdOut`, `getStdErr`, `getComponents` |
@@ -68,6 +70,8 @@ the three retired 0.1.x methods' exact pinned replacements (design Decision 5):
 | `src/client/datto-rmm-client.ts` | Created | `DattoRmmClient`: config `.safeParse` → `DattoValidationError`, masked logger, `MultiWindowRateLimiter`, `createHttpClient`, `AuthManager.attachTo`, mounts `account`/`sites`/`devices`/`alerts`/`jobs` |
 | `src/client/datto-client-config.ts` | Modified (doc only) | Corrected a stale "wired in Phase 8" forward reference (`DattoRmmClient` is wired in this phase, not Phase 8) — no behavior change |
 | `src/validation/schema-leniency.ts` | Modified (bug fix) | `cleanAndDiagnoseResponse`'s `'object'` case now preserves an extra key when the *original* schema declares a meaningful `.catchall(...)` (e.g. `alertContextSchema`), instead of always stripping it — see §5 Deviation 2 |
+| `src/rate-limit/rate-limits.ts` | Modified (infra addition) | Added `'site-update': 100` to `WRITE_LIMITS`/`WriteOpKey`, the table's own documented extension point, so `SiteResource.update()` has a rate ceiling |
+| `src/schema-overrides/write-bodies.ts` | Modified (export added) | Exported `siteUpdateBodySchema` (re-exports the generated `updateBody` unchanged, same pattern as the existing `siteCreateBodySchema`) for `SiteResource.update()`'s request validation |
 | `tests/unit/client/resources/account-resource.test.ts` | Created | 9 tests (nock) |
 | `tests/unit/client/resources/site-resource.test.ts` | Created | 13 tests (nock) |
 | `tests/unit/client/resources/device-resource.test.ts` | Created | 10 tests (nock), incl. an R20 end-to-end masking assertion |
@@ -181,9 +185,22 @@ necessity" per the plan's Guardrails: it repairs a defect this phase's own new, 
 exposed, required for `AlertResource` — this phase's own deliverable — to satisfy R8, not an
 unrelated refactor of Phase 4.
 
-No other deviations. Every other design/plan interpretation (namespace grouping, opKey reuse,
-skipped operations) is documented in-place in the relevant class's own JSDoc (§4) rather than
-repeated here.
+**Deviation 3 — `SiteResource.update()` implemented, requiring a `'site-update'` addition to
+Phase 5's `rate-limits.ts`.** `POST /api/v2/site/{siteUid}` is a real, spec-defined write. This
+phase's initial implementation left it out for lack of a corresponding `WriteOpKey` (see §6/§11's
+history below); Step A review (`implementation-auditor-r1-f4`) correctly flagged this as an
+uncovered spec operation rather than an accepted gap, so it was closed during findings
+resolution: added `'site-update': 100` to `WRITE_LIMITS`/`WriteOpKey` in
+`src/rate-limit/rate-limits.ts` — the table's own doc names this as its expected extension point
+("Adding a write method requires adding its opKey here first"), so this is in-scope infra growth,
+not a boundary violation of the coexistence rule (which protects the *old*, pre-refactor runtime
+surface, not Phase 5's own extensible tables). Implemented `update()` reusing `getSiteResponse`
+(byte-for-byte identical, generated shape to `updateResponse`) and exported
+`siteUpdateBodySchema` from `src/schema-overrides/write-bodies.ts` for the request body. This
+closes the one previously-known gap in `SiteResource`'s coverage of the real spec.
+
+Every other design/plan interpretation (namespace grouping, opKey reuse, skipped operations) is
+documented in-place in the relevant class's own JSDoc (§4) rather than repeated here.
 
 ---
 
@@ -205,13 +222,14 @@ repeated here.
   Phase 8 (§4) — the lower-risk choice: leaving it out is a gap Phase 8's own coverage-map test
   (plan Phase 8 Step 8) will mechanically catch and force a decision on; implementing it here risks
   Phase 8 duplicating the same operation under `UserResource`, a harder-to-detect conflict.
-- **Site `update()` (`POST /api/v2/site/{siteUid}`) is not implemented.** Phase 5's `WRITE_LIMITS`
-  table has no `WriteOpKey` for it — a gap `write-bodies.ts` (Phase 6) already flagged as needing a
-  new key added to that untouched Phase 5 file before the method could exist. Editing
-  `rate-limits.ts` is out of this phase's declared step scope (unlike the `schema-leniency.ts` fix
-  in §5, this is not required for any of this phase's own deliverables to function — `SiteResource`
-  is fully usable and tested without `update()`). Documented in `SiteResource`'s class doc and
-  flagged again here for a maintainer/reviewer to add `'site-update'` to `WRITE_LIMITS`.
+- **Site `update()` (`POST /api/v2/site/{siteUid}`) — is implemented.** This phase's initial pass
+  left it out: Phase 5's `WRITE_LIMITS` table had no `WriteOpKey` for it, a gap `write-bodies.ts`
+  (Phase 6) had already flagged, and editing `rate-limits.ts` was judged out of this phase's
+  declared step scope since `SiteResource` was otherwise fully usable and tested without
+  `update()`. Step A review (`implementation-auditor-r1-f4`) correctly treated that gap as a real,
+  uncovered spec operation rather than an acceptable omission; resolved during findings resolution
+  by adding `'site-update': 100` to `WRITE_LIMITS`/`WriteOpKey` (the table's own doc names this as
+  its intended extension point) and implementing `update()` against it — see §5 Deviation 3.
 - **`account-variable-set`/`site-variable-set`/`device-proxy-set` reused for their `DELETE`
   counterparts.** Phase 6's remaining-risks section explicitly left this decision to Phase 7/8,
   citing the design's own "variable mutations"/"proxy... mutations" grouping language. Resolved:
@@ -308,11 +326,6 @@ repeated here.
 
 ## 11. Remaining Risks or Follow-Ups
 
-- **Site `update()` (`POST /api/v2/site/{siteUid}`) has no `WriteOpKey`.** Flagged in §6; a
-  maintainer/reviewer needs to add `'site-update'` to Phase 5's `WRITE_LIMITS` table before
-  `SiteResource.update()` can be implemented. Not blocking this phase (no plan step requires it),
-  but it is a real, uncovered spec operation until resolved — Phase 8's coverage-map test (plan
-  Phase 8 Step 8) will surface it mechanically if it is still missing by then.
 - **`getUsers` deferred to Phase 8.** Phase 8's `UserResource` implementor should confirm this
   operation lands there (`GET /api/v2/account/users`) rather than assuming `AccountResource`
   already covers it.
@@ -349,11 +362,13 @@ repeated here.
 ## 13. Final Assertion
 
 I assert that:
-- Only Phase 7 has been implemented — the five named resource classes and the `DattoRmmClient`
-  scaffold mounting them, plus the minimal, fully-documented necessities in `datto-client-config.ts`
-  (doc-only) and `schema-leniency.ts` (a targeted bug fix required for this phase's own
-  `AlertResource` to satisfy R8) that this phase's own testing surfaced.
-- No unnecessary scope expansion occurred: `src/index.ts`, the remaining five namespaces,
-  `createDattoRmmClient`, and Phase 5's `rate-limits.ts` table are all untouched, left for Phase 8
-  (or a maintainer, for the `site-update` gap) as documented in §6/§11.
+- Only Phase 7 has been implemented — the five named resource classes (including
+  `SiteResource.update()`, closed during findings resolution per §5 Deviation 3) and the
+  `DattoRmmClient` scaffold mounting them, plus the minimal, fully-documented necessities in
+  `datto-client-config.ts` (doc-only), `schema-leniency.ts` (a targeted bug fix required for this
+  phase's own `AlertResource` to satisfy R8), and Phase 5's `rate-limits.ts` (the `'site-update'`
+  `WriteOpKey` addition, its own documented extension point) that this phase's own testing and
+  Step A review surfaced.
+- No unnecessary scope expansion occurred: `src/index.ts`, the remaining five namespaces, and
+  `createDattoRmmClient` are all untouched, left for Phase 8 as documented in §6/§11.
 - All quality scores are ≥ 9.5.
