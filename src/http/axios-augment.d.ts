@@ -1,9 +1,13 @@
 import type { RateDescriptor } from "../rate-limit/rate-limiter";
 
+import type { ObserverCapture } from "./observer";
+
 /**
  * Private typecheck aid: augments Axios's own request-config types with the `rateDescriptor`
  * property the request interceptor in `http-client.ts` reads (and `BaseResource`'s `http*`
- * primitives / `paginate`, Phase 6, attach). Axios does not declare this property itself.
+ * primitives / `paginate`, Phase 6, attach) and the `__dattoObserverCapture` property the
+ * HTTP-observer seam's request interceptor stashes and its response interceptors read back
+ * (Phase 2). Axios does not declare either property itself.
  *
  * **Must stay a private typecheck aid — never emitted into the published `dist/index.d.ts`.** A
  * global `declare module 'axios'` that reached the published types would widen *every*
@@ -19,10 +23,12 @@ import type { RateDescriptor } from "../rate-limit/rate-limiter";
 declare module "axios" {
   interface AxiosRequestConfig {
     rateDescriptor?: RateDescriptor;
+    __dattoObserverCapture?: ObserverCapture;
   }
 
   interface InternalAxiosRequestConfig {
     rateDescriptor?: RateDescriptor;
+    __dattoObserverCapture?: ObserverCapture;
   }
 }
 

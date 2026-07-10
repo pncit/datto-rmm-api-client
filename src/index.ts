@@ -11,6 +11,13 @@
 export { createDattoRmmClient, DattoRmmClient } from "./client/datto-rmm-client";
 export type { DattoRmmClientConfig } from "./client/datto-client-config";
 export type { DattoLogger } from "./logging/logger";
+export type {
+  DattoHttpObserver,
+  DattoHttpRequestEvent,
+  DattoHttpResponseEvent,
+  DattoHttpErrorEvent,
+  DattoHttpHeaders,
+} from "./http/http-observer";
 export {
   BaseError,
   DattoApiError,

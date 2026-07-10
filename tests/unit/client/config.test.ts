@@ -31,8 +31,56 @@ describe("dattoRmmClientConfigSchema", () => {
         writeAggregateLimit: 600,
         windowSeconds: 60,
       },
+      httpObserver: {
+        onRequest: () => {},
+        onResponse: () => {},
+        onError: () => {},
+      },
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts an httpObserver with all three raw callbacks, still invocable after parsing", () => {
+    const received: unknown[] = [];
+    const result = dattoRmmClientConfigSchema.safeParse({
+      ...MINIMAL_CONFIG,
+      httpObserver: {
+        onRequest: (event: unknown) => {
+          received.push(event);
+        },
+        onResponse: (event: unknown) => {
+          received.push(event);
+        },
+        onError: (event: unknown) => {
+          received.push(event);
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    const { httpObserver } = result.data;
+    const rawEvent = { secret: "bearer-token-value" };
+    httpObserver?.onRequest?.(rawEvent as never);
+
+    expect(received).toEqual([rawEvent]);
+  });
+
+  it("rejects an httpObserver carrying an unknown key", () => {
+    const result = dattoRmmClientConfigSchema.safeParse({
+      ...MINIMAL_CONFIG,
+      httpObserver: { onRequest: () => {}, somethingElse: true },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an httpObserver whose callback is not a function", () => {
+    const result = dattoRmmClientConfigSchema.safeParse({
+      ...MINIMAL_CONFIG,
+      httpObserver: { onRequest: "not-a-function" },
+    });
+    expect(result.success).toBe(false);
   });
 
   it("rejects an unknown top-level key", () => {
