@@ -5,10 +5,14 @@ import {
   dattoHttpObserverSchema,
   type DattoHttpErrorEvent,
   type DattoHttpObserver,
+  type DattoHttpRequestEvent,
+  type DattoHttpResponseEvent,
 } from "@/http/http-observer";
 import {
   captureRequest,
   fireError,
+  fireRequest,
+  fireResponse,
   invokeObserver,
   normalizeHeaders,
 } from "@/http/observer";
@@ -120,12 +124,18 @@ describe("captureRequest", () => {
   });
 });
 
+/** A stand-in event shape for `invokeObserver`'s generic-over-`E` tests below — any object shape
+ * works since `invokeObserver` never inspects the event, it only forwards it to `fn`. */
+type TestEvent = { some: string };
+
 describe("invokeObserver", () => {
   it("is a no-op when the callback is undefined", () => {
     const logger = fakeLogger();
 
     expect(() =>
-      invokeObserver(logger, "onRequest", undefined, {}),
+      invokeObserver<TestEvent>(logger, "onRequest", undefined, {
+        some: "event",
+      }),
     ).not.toThrow();
     expect(logger.warn).not.toHaveBeenCalled();
   });
@@ -134,7 +144,7 @@ describe("invokeObserver", () => {
     const logger = fakeLogger();
     const fn = (() => {
       throw new Error("callback boom");
-    }) as unknown as (event: never) => void;
+    }) as unknown as (event: TestEvent) => void;
 
     expect(() =>
       invokeObserver(logger, "onError", fn, { some: "event" }),
@@ -151,7 +161,7 @@ describe("invokeObserver", () => {
     const logger = fakeLogger();
     const fn = (() =>
       Promise.reject(new Error("async boom"))) as unknown as (
-      event: never,
+      event: TestEvent,
     ) => void;
 
     expect(() =>
@@ -177,11 +187,58 @@ describe("invokeObserver", () => {
           settled = true;
           resolve();
         }, 50);
-      })) as unknown as (event: never) => void;
+      })) as unknown as (event: TestEvent) => void;
 
-    invokeObserver(logger, "onRequest", fn, {});
+    invokeObserver(logger, "onRequest", fn, { some: "event" });
 
     expect(settled).toBe(false);
+  });
+
+  it("guards a throwing logger.warn so it neither escapes nor leaves an unhandled rejection (Cluster 3)", async () => {
+    const throwingLogger: DattoLogger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(() => {
+        throw new Error("logger itself is broken");
+      }),
+      error: vi.fn(),
+    };
+
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+
+    try {
+      // Synchronous-throw path: a throwing logger.warn must not escape invokeObserver.
+      const throwingFn = (() => {
+        throw new Error("callback boom");
+      }) as unknown as (event: TestEvent) => void;
+      expect(() =>
+        invokeObserver(throwingLogger, "onError", throwingFn, {
+          some: "event",
+        }),
+      ).not.toThrow();
+
+      // Rejected-promise path: a throwing logger.warn inside the .then rejection handler must
+      // not produce an unhandled rejection.
+      const rejectingFn = (() =>
+        Promise.reject(new Error("async boom"))) as unknown as (
+        event: TestEvent,
+      ) => void;
+      expect(() =>
+        invokeObserver(throwingLogger, "onResponse", rejectingFn, {
+          some: "event",
+        }),
+      ).not.toThrow();
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+
+    expect(unhandledRejections).toHaveLength(0);
   });
 });
 
@@ -191,6 +248,24 @@ describe("invokeObserver on a schema-parsed callback (R7 regression — f1/f2)",
   // A wrapping/validating schema (e.g. zod's z.function) would defeat R7 here; this test must
   // fail against such a schema and pass against a non-wrapping, shape-only one.
 
+  const requestEvent: DattoHttpRequestEvent = {
+    method: "GET",
+    url: "https://api.example.com/foo",
+    headers: {},
+    body: undefined,
+  };
+
+  const responseEvent: DattoHttpResponseEvent = {
+    method: "GET",
+    url: "https://api.example.com/foo",
+    requestHeaders: {},
+    requestBody: undefined,
+    statusCode: 200,
+    responseHeaders: {},
+    responseBody: undefined,
+    durationMs: 5,
+  };
+
   it("does not warn when a parsed callback returns a non-undefined value", () => {
     const logger = fakeLogger();
     const received: unknown[] = [];
@@ -199,9 +274,9 @@ describe("invokeObserver on a schema-parsed callback (R7 regression — f1/f2)",
       onRequest: (event: unknown) => received.push(event),
     });
 
-    invokeObserver(logger, "onRequest", parsed.onRequest, { some: "event" });
+    invokeObserver(logger, "onRequest", parsed.onRequest, requestEvent);
 
-    expect(received).toEqual([{ some: "event" }]);
+    expect(received).toEqual([requestEvent]);
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
@@ -221,9 +296,7 @@ describe("invokeObserver on a schema-parsed callback (R7 regression — f1/f2)",
 
     try {
       expect(() =>
-        invokeObserver(logger, "onResponse", parsed.onResponse, {
-          some: "event",
-        }),
+        invokeObserver(logger, "onResponse", parsed.onResponse, responseEvent),
       ).not.toThrow();
 
       // Flush the microtask queue so any attached/unhandled rejection surfaces.
@@ -248,6 +321,89 @@ describe("invokeObserver on a schema-parsed callback (R7 regression — f1/f2)",
     const parsed = dattoHttpObserverSchema.parse({ onRequest });
 
     expect(parsed.onRequest).toBe(onRequest);
+  });
+});
+
+describe("fireRequest", () => {
+  const capture = {
+    method: "GET",
+    url: "https://api.example.com/foo",
+    headers: { "x-test": "value" },
+    body: { a: 1 },
+    startedAt: Date.now(),
+  };
+
+  it("assembles the DattoHttpRequestEvent from the capture", () => {
+    const events: DattoHttpRequestEvent[] = [];
+    const observer: DattoHttpObserver = { onRequest: (event) => events.push(event) };
+
+    fireRequest(undefined, observer, capture);
+
+    expect(events).toHaveLength(1);
+    const event = events[0]!;
+    expect(event.method).toBe(capture.method);
+    expect(event.url).toBe(capture.url);
+    expect(event.headers).toEqual(capture.headers);
+    expect(event.body).toEqual(capture.body);
+  });
+
+  it("is a no-op when observer is absent", () => {
+    expect(() => fireRequest(undefined, undefined, capture)).not.toThrow();
+  });
+
+  it("is a no-op when observer carries no onRequest callback", () => {
+    expect(() =>
+      fireRequest(undefined, { onResponse: () => {} }, capture),
+    ).not.toThrow();
+  });
+});
+
+describe("fireResponse", () => {
+  const capture = {
+    method: "POST",
+    url: "https://api.example.com/foo",
+    headers: { "x-test": "value" },
+    body: { a: 1 },
+    startedAt: Date.now() - 10,
+  };
+
+  it("assembles the DattoHttpResponseEvent, normalizing AxiosHeaders and computing durationMs", () => {
+    const events: DattoHttpResponseEvent[] = [];
+    const observer: DattoHttpObserver = { onResponse: (event) => events.push(event) };
+    const response = fakeAxiosResponse({
+      status: 200,
+      headers: new AxiosHeaders({ "content-type": "application/json" }),
+      data: { ok: true },
+    });
+
+    fireResponse(undefined, observer, capture, response);
+
+    expect(events).toHaveLength(1);
+    const event = events[0]!;
+    expect(event.method).toBe(capture.method);
+    expect(event.url).toBe(capture.url);
+    expect(event.requestHeaders).toEqual(capture.headers);
+    expect(event.requestBody).toEqual(capture.body);
+    expect(event.statusCode).toBe(200);
+    expect(event.responseHeaders).toEqual(
+      (response.headers as AxiosHeaders).toJSON(),
+    );
+    expect(event.responseBody).toEqual({ ok: true });
+    expect(event.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("is a no-op when observer is absent", () => {
+    const response = fakeAxiosResponse();
+    expect(() =>
+      fireResponse(undefined, undefined, capture, response),
+    ).not.toThrow();
+  });
+
+  it("is a no-op when observer carries no onResponse callback", () => {
+    const response = fakeAxiosResponse();
+    expect(() =>
+      fireResponse(undefined, { onRequest: () => {} }, capture, response),
+    ).not.toThrow();
   });
 });
 

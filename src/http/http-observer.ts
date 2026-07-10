@@ -101,8 +101,11 @@ export interface DattoHttpObserver {
 }
 
 /**
- * Shape-only schema for a single observer callback: validates that a supplied value is callable,
- * without constraining what it does with its argument or its return value.
+ * Shape-only schema factory for a single observer callback field: validates that a supplied value
+ * is callable, without constraining what it does with its argument or its return value. Generic
+ * *per field* (rather than one shared, field-agnostic validator) so `z.infer` preserves each
+ * field's concrete callback type instead of collapsing all three to a common denominator — see
+ * the round-2 regression this replaced, below.
  *
  * This deliberately does **not** mirror {@link dattoLoggerSchema}'s per-method `z.function`
  * approach (`../logging/logger.ts`). In the installed `zod` (4.x), `z.function(...).parse(fn)`
@@ -116,19 +119,29 @@ export interface DattoHttpObserver {
  * requires `invokeObserver` (`./observer.ts`) — not the schema — to see and handle the callback's
  * actual return value. `z.custom` returns the input unchanged on success, so the raw function
  * reference the consumer supplied is what gets delivered.
+ *
+ * A round-1 fix collapsed this to a single **shared, field-agnostic**
+ * `z.custom<(event: never) => unknown>()` reused for all three fields. That preserved the raw
+ * identity pass-through, but because every field shared the same generic argument,
+ * `z.infer<typeof dattoHttpObserverSchema>` — and therefore the directly-exported
+ * `DattoRmmClientConfig["httpObserver"]` — typed every callback parameter as `never`, defeating
+ * the entire point of the five published event types for the most idiomatic inline-config usage.
+ * This per-field generic keeps the raw pass-through *and* restores per-field type precision.
  */
-const observerCallbackSchema = z
-  .custom<(event: never) => unknown>((value) => typeof value === "function")
-  .optional();
+function observerCallbackSchema<Fn>() {
+  return z.custom<Fn>((value) => typeof value === "function").optional();
+}
 
 /**
  * Zod schema for {@link DattoHttpObserver}. Validates structure only — that each supplied
  * callback is a function — never the event shape a consumer's callback is invoked with, so
  * parsing never strips or redacts a field from the raw payload (R9). `.strictObject` rejects any
- * key beyond the three known callbacks.
+ * key beyond the three known callbacks. Each field is keyed off `DattoHttpObserver`'s own
+ * per-field type (rather than a re-spelled `(event: E) => unknown`), so the hand-authored
+ * interface stays the single source of truth `z.infer` tracks.
  */
 export const dattoHttpObserverSchema = z.strictObject({
-  onRequest: observerCallbackSchema,
-  onResponse: observerCallbackSchema,
-  onError: observerCallbackSchema,
+  onRequest: observerCallbackSchema<DattoHttpObserver["onRequest"]>(),
+  onResponse: observerCallbackSchema<DattoHttpObserver["onResponse"]>(),
+  onError: observerCallbackSchema<DattoHttpObserver["onError"]>(),
 });

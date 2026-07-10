@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { dattoRmmClientConfigSchema } from "../../../src/client/datto-client-config";
+import type { DattoHttpRequestEvent } from "../../../src/http/http-observer";
 
 const MINIMAL_CONFIG = {
   apiUrl: "https://zinfandel-api.centrastage.net",
@@ -61,8 +62,13 @@ describe("dattoRmmClientConfigSchema", () => {
     if (!result.success) return;
 
     const { httpObserver } = result.data;
-    const rawEvent = { secret: "bearer-token-value" };
-    httpObserver?.onRequest?.(rawEvent as never);
+    const rawEvent: DattoHttpRequestEvent = {
+      method: "GET",
+      url: "https://api.example.com/foo",
+      headers: {},
+      body: { secret: "bearer-token-value" },
+    };
+    httpObserver?.onRequest?.(rawEvent);
 
     // Identity, not just structural equality: parsing must neither clone the payload nor
     // substitute the callback with a wrapper that reconstructs its argument.

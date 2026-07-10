@@ -52,7 +52,7 @@ export function normalizeHeaders(headers: unknown): DattoHttpHeaders {
     typeof (headers as { toJSON?: () => unknown }).toJSON === "function"
       ? (headers as { toJSON: () => unknown }).toJSON()
       : headers;
-  return { ...(raw as Record<string, string | string[] | undefined>) };
+  return { ...(raw as DattoHttpHeaders) };
 }
 
 /**
@@ -68,7 +68,7 @@ export function captureRequest(args: {
   readonly body: unknown;
 }): ObserverCapture {
   return {
-    method: (args.method ?? "get").toUpperCase(),
+    method: (args.method || "get").toUpperCase(),
     url: args.url,
     headers: normalizeHeaders(args.headers),
     body: args.body,
@@ -77,45 +77,67 @@ export function captureRequest(args: {
 }
 
 /**
+ * Logs one swallow-`warn` for a failed observer callback, itself guarded: a consumer-supplied
+ * `DattoLogger.warn` is shape-only validated and could throw. If it does, there is nothing further
+ * that can be safely done — swallow that too, rather than letting a misbehaving logger reopen the
+ * exact escape (an uncontrolled throw / unhandled rejection) `invokeObserver` exists to prevent.
+ */
+function safeWarn(
+  logger: DattoLogger | undefined,
+  callbackName: ObserverCallbackName,
+  message: string,
+): void {
+  try {
+    logger?.warn(message, { callback: callbackName });
+  } catch {
+    // The logger itself misbehaved; nothing further to do safely.
+  }
+}
+
+/**
  * Invokes a single observer callback so that a synchronous `throw`, or a rejection from an
  * accidentally-async callback, can never propagate into or delay the request (R7). The callback
  * is invoked synchronously and its return value is never awaited; when the return value is
  * thenable, a `.catch`-equivalent handler is attached (without awaiting it) that swallows the
  * rejection. Every swallowed failure logs exactly one `warn`, naming the failing callback so it is
- * attributable.
+ * attributable — and that `warn` call is itself guarded (`safeWarn`) so a throwing logger can
+ * never re-open the hole this function exists to close.
  *
- * `fn`'s parameter is typed `never` rather than a concrete event type so this single helper can
- * accept `onRequest`/`onResponse`/`onError` — each a function over a different event type —
- * without a generic per call site; `never` is assignable to every event type, so every concrete
- * callback is assignable here.
+ * Generic over the event type `E`, so each of the three call sites (`fireRequest`/`fireResponse`/
+ * `fireError`) pins its own callback to its own event shape at compile time — e.g.
+ * `invokeObserver<DattoHttpRequestEvent>(...)` — rather than sharing a single `never`-typed `fn`
+ * parameter that erases the callback/event pairing.
  */
-export function invokeObserver(
+export function invokeObserver<E>(
   logger: DattoLogger | undefined,
   callbackName: ObserverCallbackName,
-  fn: ((event: never) => void) | undefined,
-  event: unknown,
+  fn: ((event: E) => void) | undefined,
+  event: E,
 ): void {
   if (!fn) {
     return;
   }
   try {
-    const returned = (fn as (event: unknown) => unknown)(event);
+    const returned: unknown = fn(event);
     if (
       returned !== null &&
       typeof returned === "object" &&
       typeof (returned as PromiseLike<unknown>).then === "function"
     ) {
       (returned as PromiseLike<unknown>).then(undefined, () => {
-        logger?.warn(
+        safeWarn(
+          logger,
+          callbackName,
           `httpObserver ${callbackName} callback rejected; ignored`,
-          { callback: callbackName },
         );
       });
     }
   } catch {
-    logger?.warn(`httpObserver ${callbackName} callback threw; ignored`, {
-      callback: callbackName,
-    });
+    safeWarn(
+      logger,
+      callbackName,
+      `httpObserver ${callbackName} callback threw; ignored`,
+    );
   }
 }
 
@@ -134,7 +156,12 @@ export function fireRequest(
     headers: capture.headers,
     body: capture.body,
   };
-  invokeObserver(logger, "onRequest", observer.onRequest, event);
+  invokeObserver<DattoHttpRequestEvent>(
+    logger,
+    "onRequest",
+    observer.onRequest,
+    event,
+  );
 }
 
 /** Fires `onResponse` for a 2xx `response`, reusing `capture` for the request-side fields. */
@@ -157,7 +184,12 @@ export function fireResponse(
     responseBody: response.data,
     durationMs: Date.now() - capture.startedAt,
   };
-  invokeObserver(logger, "onResponse", observer.onResponse, event);
+  invokeObserver<DattoHttpResponseEvent>(
+    logger,
+    "onResponse",
+    observer.onResponse,
+    event,
+  );
 }
 
 /**
@@ -192,5 +224,5 @@ export function fireError(
         }
       : {}),
   };
-  invokeObserver(logger, "onError", observer.onError, event);
+  invokeObserver<DattoHttpErrorEvent>(logger, "onError", observer.onError, event);
 }
