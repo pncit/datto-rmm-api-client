@@ -73,7 +73,7 @@ Nothing today lets a consumer observe raw HTTP exchanges. `axiosInstance` inject
 
 Add an optional `httpObserver` to `DattoRmmClientConfig`: a `DattoHttpObserver` object with three optional callbacks — `onRequest`, `onResponse`, `onError`. `DattoRmmClient` threads the observer (unmasked, unlike the logger) into both transport layers. Each layer wraps its existing send path so that:
 
-- immediately before an attempt is dispatched, `onRequest` fires with the method, URL, wire-form headers, and wire-form body;
+- immediately before an attempt is dispatched, `onRequest` fires with the method, the **absolute resolved** URL (`baseURL` + path), wire-form headers, and wire-form body;
 - when the attempt returns a 2xx, `onResponse` fires with the request fields, the response status/headers/body, and the elapsed wire time;
 - when the attempt returns a non-2xx or no response, `onError` fires with the request fields, the response fields (when a response was received), the mapped `DattoApiError`, and the elapsed wire time.
 
@@ -99,14 +99,14 @@ type DattoHttpHeaders = Record<string, string | string[] | undefined>;
 
 interface DattoHttpRequestEvent {
   method: string;
-  url: string;
+  url: string;                // the absolute resolved request URL (baseURL + path) exactly as dispatched, e.g. `${apiUrl}${path}` for a resource request and `${apiUrl}${GRANT_PATH}` for the grant — never a bare relative path (Decision 5, R3/R4)
   headers: DattoHttpHeaders; // shared-instance requests carry Authorization: Bearer; the grant's Authorization: Basic (public-client:public) is applied by axios internally and is absent by design
   body: unknown;             // the serialized urlencoded string for the grant, the pre-serialization request object for JSON (Decision 5, R5)
 }
 
 interface DattoHttpResponseEvent {
   method: string;
-  url: string;
+  url: string;                // the same absolute resolved URL captured on the request event (baseURL + path)
   requestHeaders: DattoHttpHeaders;
   requestBody: unknown;
   statusCode: number;
@@ -117,7 +117,7 @@ interface DattoHttpResponseEvent {
 
 interface DattoHttpErrorEvent {
   method: string;
-  url: string;
+  url: string;                // the same absolute resolved URL captured on the request event (baseURL + path)
   requestHeaders: DattoHttpHeaders;
   requestBody: unknown;
   error: DattoApiError;              // always mapped; never a raw axios error
@@ -188,6 +188,8 @@ Whenever `httpObserver` is present, the client **captures-and-stashes** the meth
 
 The stash is **unconditionally overwritten on every interceptor pass** (idempotent re-capture), never written conditionally ("only if absent"). This matters because retries re-issue via `instance.request(config)` reusing the **same** config object, so attempt N's stash persists on that object into attempt N+1; the request interceptor re-fires and overwrites it before attempt N+1's terminal event reads it. A conditional stash would make attempt N+1's terminal event report attempt N's stale request fields and `durationMs`, silently breaking R2 per-attempt fidelity. Terminal events read the stash before the next pass re-dispatches, so a config object reused across retries never leaks a prior attempt's capture.
 
+The captured `url` is the **absolute resolved** request URL — `baseURL` concatenated with the path — not the bare relative path axios holds in `requestConfig.url`. The shared instance composes it as `` `${requestConfig.baseURL ?? ""}${requestConfig.url ?? ""}` `` at the dispatch point; the grant path composes `apiUrl + GRANT_PATH`. A bare relative path would be an incomplete audit artifact for "every outbound HTTP exchange" — the consumer's pipeline must be able to record which host each exchange hit, so the resolved URL is pinned rather than left transport-relative.
+
 The grant path carries no interceptors (Decision 2), so it captures-and-stashes at its own dispatch point inside `performRefresh` — the same capture-and-stash rule, applied directly at the call site rather than through an interceptor.
 
 The header contract has one documented exception on the grant call: `Authorization: Bearer` is present on shared-instance requests, but the grant's `Authorization: Basic` header (the non-secret `public-client:public` pair) is applied by axios internally from the per-request `auth:` option and is therefore **absent by design** from the captured header map. The security-relevant credential on the grant is the API key, which rides in the captured body and is captured faithfully.
@@ -244,6 +246,7 @@ None.
 - A JSON write delivers its body as the pre-serialization request object; the grant delivers its body as the serialized urlencoded string.
 - An attempt's terminal event (`onResponse`/`onError`) carries `requestHeaders`/`requestBody` identical to what `onRequest` observed for the same attempt — the stashed capture, not the serialized/normalized `response.config` values.
 - The observed shared-instance request carries the `Authorization: Bearer` header; the grant's captured header map omits `Authorization` (the Basic header applied internally by axios), with the API key present in the captured body.
+- Every event's `url` is the **absolute resolved** URL (`baseURL` + path): a resource request observes `` `${apiUrl}${path}` `` and the grant observes `` `${apiUrl}${GRANT_PATH}` ``, never a bare relative path.
 - `durationMs` measures dispatch→response and excludes rate-limiter throttle wait: an injected throttle delay before dispatch is not folded into `durationMs`.
 - `onError.error` is a `DattoApiError` in every case, including transport failures (`statusCode` absent) and mapped HTTP failures (`statusCode` present).
 - A grant POST that returns 2xx with a **malformed** token body fires exactly one terminal event — `onResponse` with the raw response body — and does **not** fire `onError` (see Decision 4).
@@ -256,7 +259,7 @@ None.
 ### Verification
 
 - `npm run typecheck` — the public surface compiles and exports exactly the five observer types — `DattoHttpObserver`, its three named payload types (`DattoHttpRequestEvent` / `DattoHttpResponseEvent` / `DattoHttpErrorEvent`), and `DattoHttpHeaders` — with no axios type in their signatures.
-- `npm test` — existing suites pass unchanged; new unit tests cover per-attempt firing (retry, pagination, grant), 2xx/non-2xx/transport-failure terminal selection, raw body/header fidelity, `DattoApiError` typing, and observer-throw isolation. Specifically: the observed shared-instance request carries `Authorization: Bearer`; the terminal event's `requestBody`/`requestHeaders` match the values `onRequest` captured for the same attempt (not the serialized/normalized `response.config`); the grant's captured headers omit `Authorization` while the body carries the API key; a grant POST returning 2xx with a malformed token body fires exactly one terminal event — `onResponse` with the raw response body — and fires **no** `onError`, even though `performRefresh` throws a `DattoApiError`; an injected pre-dispatch throttle delay is excluded from `durationMs`; a lazy-refresh grant failure fires `onError` exactly once (on the grant attempt) and no second `onError` on the shared instance; an `onError`-only consumer (no `onRequest` supplied) still receives a terminal `onError` on a dispatched non-2xx attempt with `requestHeaders`/`requestBody`/`durationMs` populated from the stash; and an async callback returning a rejected promise leaves the request unaffected, logs one `warn`, and produces no unhandled rejection.
+- `npm test` — existing suites pass unchanged; new unit tests cover per-attempt firing (retry, pagination, grant), 2xx/non-2xx/transport-failure terminal selection, raw body/header fidelity, `DattoApiError` typing, and observer-throw isolation. Specifically: the observed shared-instance request carries `Authorization: Bearer`; the terminal event's `requestBody`/`requestHeaders` match the values `onRequest` captured for the same attempt (not the serialized/normalized `response.config`); the grant's captured headers omit `Authorization` while the body carries the API key; every event's `url` is the absolute resolved URL (`baseURL` + path) for both a resource request and the grant, never a bare relative path; a grant POST returning 2xx with a malformed token body fires exactly one terminal event — `onResponse` with the raw response body — and fires **no** `onError`, even though `performRefresh` throws a `DattoApiError`; an injected pre-dispatch throttle delay is excluded from `durationMs`; a lazy-refresh grant failure fires `onError` exactly once (on the grant attempt) and no second `onError` on the shared instance; an `onError`-only consumer (no `onRequest` supplied) still receives a terminal `onError` on a dispatched non-2xx attempt with `requestHeaders`/`requestBody`/`durationMs` populated from the stash; and an async callback returning a rejected promise leaves the request unaffected, logs one `warn`, and produces no unhandled rejection.
 - Confirm `dist/index.d.ts` contains no `declare module "axios"` and no axios type in the observer signatures (the existing Phase 8 exit-gate check extended to the new surface).
 
 ### What Stays the Same
