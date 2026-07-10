@@ -5,6 +5,14 @@
       "plan-auditor-r1-f4": "Mediator ruling: Add `npm run build` and `! grep -q 'declare module' dist/index.d.ts` to the Phase 2 **and** Phase 3 Exit Gates \u2014 those are the phases that first make axios-importing `src/http/observer.ts` reachable from the `index.ts` value graph, so a leaked `declare module` should be caught there, not two phases downstream at Phase 4. Do **not** add a blanket `grep 'axios' dist/index.d.ts`: `dist/index.d.ts` already references `AxiosInstance`/`AxiosError` legitimately today (16 refs, verified) via `BaseResource.axios` / `DattoApiError.fromAxiosError`, so that check would fail. The `! grep -iq 'axios' src/http/http-observer.ts` source check need not be added to Phase 2/3 \u2014 that file isn't edited there.",
       "plan-auditor-r1-f2": "Modify plan.md: 1) Narrow the gate \u2014 e.g.  ! grep -Eq from [\\\"]axios[\"] src/http/http-observer.ts  plus an optional  ! grep -Eq '\\bAxios[A-Z]' \u2026  type check: precise, tolerates explanatory prose, still catches a real leak. AND 2) strip axios from the example.",
       "plan-auditor-r1-f3": "Update the design: Accept  index.ts-direct and amend the design to say the observer types export directly from  index.ts  alongside  DattoLogger"
+    },
+    "plan:p2": {
+      "engineer-r1-f3": "Mediator ruling: Add the shared capture-and-stash **assembler** to `observer.ts` (design Decision 2 already mandates it \u2014 \"the two instrumentation points cannot drift\") and route both sites through it so method-uppercasing and header normalization live in one place; **do not** take the \"reconcile the design to site-local capture\" option. Foundation for Cluster 1.",
+      "engineer-r1-f5": "Mediator ruling: Adopt lightweight attribution: thread the callback name (`\"onRequest\"`/`\"onResponse\"`/`\"onError\"`) into `invokeObserver` and include it in the swallow `warn` (message or `meta`); `method`/`url` context is optional, left to the implementor. The finding has merit and the cost is trivial.",
+      "engineer-r1-f6": "Mediator ruling: **Keep** the global `axios-augment.d.ts` stash \u2014 design Decision 5 / Schema-and-wiring (design L217) explicitly mandates the `rateDescriptor` precedent and architect ratified it as sound; do **not** switch to a local intersection. Fix only the plan muddle: the Phase 2 example (L257) casts `error.config as RetryTrackedConfig` yet reads `__dattoObserverCapture`, which is **not** on `RetryTrackedConfig` \u2014 read it off the globally-augmented config directly, and add a one-line note reconciling the `__datto` prefix vs the sibling unprefixed `rateDescriptor`.",
+      "engineer-r1-f7": "Mediator ruling: State the new `handleResponseError` parameter (6th positional, `httpObserver?: DattoHttpObserver`, inserted before `error`) explicitly in Phase 2 Step 4 **prose**, not only the example; the options-object refactor is optional and **not** mandated (avoid scope creep on a stable signature).",
+      "engineer-r1-f8": "Mediator ruling: Instruct the implementor (Phase 2 S1 / Phase 3 S1) to add a doc comment on the new `httpObserver` field of both `HttpClientConfig` and `AuthManagerConfig`, explicitly noting raw/unmasked delivery \u2014 unlike the adjacent masked `logger` field.",
+      "architect-r1-f2": "Mediator ruling: Design Change: pin `DattoHttpRequestEvent.url` (and the `url` on the response/error events) as the **absolute resolved** request URL (`baseURL` + path), and update the design payload comment (design L100-128) to say so \u2014 a bare relative path is insufficient for the \"every outbound HTTP exchange\" audit artifact. Plan follows: Phase 2 S2 captures `` `${requestConfig.baseURL ?? \"\"}${requestConfig.url ?? \"\"}` ``, Phase 3 S2 captures `apiUrl + GRANT_PATH`; add a test asserting the absolute `url`."
     }
   },
   "events": [
@@ -951,6 +959,195 @@
       "loop": "plan:p1",
       "k": 2,
       "variant": "delta"
+    },
+    {
+      "t": 1783720119,
+      "kind": "worker",
+      "agent": "planner",
+      "label": "plan:p1 reviser r1",
+      "ok": true,
+      "started_at": "2026-07-10T21:46:20+00:00",
+      "duration_s": 139.4,
+      "api_duration_s": 133.6,
+      "turns": 15,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.0275,
+      "tokens": {
+        "input": 692,
+        "output": 10121,
+        "cache_read": 492529,
+        "cache_creation": 52471
+      },
+      "session_id": "5f25417f-0a58-4228-9a43-14a796e1d8f8",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/review-plan/reviser-r1.md"
+    },
+    {
+      "t": 1783720119,
+      "kind": "respawn_set",
+      "loop": "plan:p1",
+      "size": 1,
+      "confirmation": false
+    },
+    {
+      "t": 1783720310,
+      "kind": "worker",
+      "agent": "plan-auditor",
+      "label": "plan:p1 plan-auditor r2",
+      "ok": true,
+      "started_at": "2026-07-10T21:48:39+00:00",
+      "duration_s": 190.4,
+      "api_duration_s": 185.5,
+      "turns": 15,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.125,
+      "tokens": {
+        "input": 682,
+        "output": 13526,
+        "cache_read": 250085,
+        "cache_creation": 65837
+      },
+      "session_id": "45266279-7ec8-46ba-ac66-7b8f2a03067a",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/review-plan/plan-auditor-r2.md"
+    },
+    {
+      "t": 1783720310,
+      "kind": "respawn_set",
+      "loop": "plan:p2",
+      "size": 2,
+      "confirmation": false
+    },
+    {
+      "t": 1783720614,
+      "kind": "worker",
+      "agent": "engineer",
+      "label": "plan:p2 engineer r1",
+      "ok": true,
+      "started_at": "2026-07-10T21:51:50+00:00",
+      "duration_s": 304.0,
+      "api_duration_s": 298.3,
+      "turns": 13,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.3631,
+      "tokens": {
+        "input": 680,
+        "output": 21529,
+        "cache_read": 184141,
+        "cache_creation": 72944
+      },
+      "session_id": "c072c609-270e-4e97-b985-6b2fd9c47cb8",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/review-plan/engineer-r1.md"
+    },
+    {
+      "t": 1783720631,
+      "kind": "worker",
+      "agent": "architect",
+      "label": "plan:p2 architect r1",
+      "ok": true,
+      "started_at": "2026-07-10T21:51:50+00:00",
+      "duration_s": 320.8,
+      "api_duration_s": 315.9,
+      "turns": 12,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.3723,
+      "tokens": {
+        "input": 678,
+        "output": 22443,
+        "cache_read": 145489,
+        "cache_creation": 73513
+      },
+      "session_id": "136a90f1-5628-42d3-bfe0-d59c95818be8",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/review-plan/architect-r1.md"
+    },
+    {
+      "t": 1783721107,
+      "kind": "worker",
+      "agent": "mediator",
+      "label": "plan:p2 triage r3",
+      "ok": true,
+      "started_at": "2026-07-10T21:57:11+00:00",
+      "duration_s": 476.5,
+      "api_duration_s": 468.0,
+      "turns": 17,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 2.0667,
+      "tokens": {
+        "input": 682,
+        "output": 35515,
+        "cache_read": 243932,
+        "cache_creation": 105344
+      },
+      "session_id": "9cfe6b0f-9109-4357-920e-be6788f22fa2",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/review-plan/triage-r3.md"
+    },
+    {
+      "t": 1783721107,
+      "kind": "triage_spawn",
+      "loop": "plan:p2",
+      "k": 3,
+      "variant": "initial"
+    },
+    {
+      "t": 1783721107,
+      "kind": "ruling_recorded",
+      "loop": "plan:p2",
+      "finding": "engineer-r1-f3",
+      "source": "triage"
+    },
+    {
+      "t": 1783721107,
+      "kind": "ruling_recorded",
+      "loop": "plan:p2",
+      "finding": "engineer-r1-f5",
+      "source": "triage"
+    },
+    {
+      "t": 1783721107,
+      "kind": "ruling_recorded",
+      "loop": "plan:p2",
+      "finding": "engineer-r1-f6",
+      "source": "triage"
+    },
+    {
+      "t": 1783721107,
+      "kind": "ruling_recorded",
+      "loop": "plan:p2",
+      "finding": "engineer-r1-f7",
+      "source": "triage"
+    },
+    {
+      "t": 1783721107,
+      "kind": "ruling_recorded",
+      "loop": "plan:p2",
+      "finding": "engineer-r1-f8",
+      "source": "triage"
+    },
+    {
+      "t": 1783721107,
+      "kind": "ruling_recorded",
+      "loop": "plan:p2",
+      "finding": "architect-r1-f2",
+      "source": "triage"
+    },
+    {
+      "t": 1783721107,
+      "kind": "triage_routes",
+      "loop": "plan:p2",
+      "k": 3,
+      "remediate": 3,
+      "challenge": 0,
+      "ruled": 6,
+      "human": 2,
+      "challenge_capped": 0
     }
   ],
   "amendments": {},
@@ -963,5 +1160,10 @@
     ],
     "cwd": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client"
   },
-  "pending_human": {}
+  "pending_human": {
+    "plan:p2": [
+      "engineer-r1-f1",
+      "architect-r1-f1"
+    ]
+  }
 }

@@ -66,7 +66,7 @@ Establish the seam's contract and shared plumbing without changing any request b
    - Notes: Keep this file un-imported by any value module (its existing doc explains why). The stash holds the captured request payload (`method`/`url`/`headers`/`body`) plus the dispatch timestamp.
 5. **Create the internal observer helper**: Create `src/http/observer.ts` exporting `ObserverCapture` (internal type), `normalizeHeaders`, `invokeObserver` (swallow-wrapper), and the event-assembly/fire helpers (`fireRequest`, `fireResponse`, `fireError`) that build a `DattoHttp*Event` from a stash + response/error and route each callback through `invokeObserver`.
    - Files: `src/http/observer.ts` (new)
-   - Notes: Internal-only — never re-exported from `index.ts`, so it never reaches `dist/index.d.ts` (like `axios-augment.d.ts`). `invokeObserver` calls the callback synchronously in a `try/catch`; on a synchronous `throw` it logs one `warn` and swallows; when the return value is thenable it attaches a `.catch` (without awaiting) that logs one `warn` and swallows (R7). `fireError` maps a status of `403` via the existing `build403Error` path and everything else via `DattoApiError.fromAxiosError`, and includes `statusCode`/`responseHeaders`/`responseBody` **only when a response was received** (R8).
+   - Notes: Internal-only — never re-exported from `index.ts`, so it never reaches `dist/index.d.ts` (like `axios-augment.d.ts`). `invokeObserver` calls the callback synchronously in a `try/catch`; on a synchronous `throw` it logs one `warn` and swallows; when the return value is thenable it attaches a `.catch` (without awaiting) that logs one `warn` and swallows (R7). `fireError` has one pinned signature — `fireError(logger, observer, capture, rawError, mappedError: DattoApiError)` — taking an already-mapped `DattoApiError` as its 5th argument; **every caller pre-maps** (the shared instance via `mapObserverError(error, build403Error)`, the grant via its own `mapped`), so `fireError` never maps internally. It includes `statusCode`/`responseHeaders`/`responseBody` **only when a response was received** (R8).
 
 ### Opinionated Implementation Notes (Examples)
 ```typescript
@@ -93,7 +93,7 @@ export interface DattoHttpResponseEvent {
 export interface DattoHttpErrorEvent {
   method: string; url: string;
   requestHeaders: DattoHttpHeaders; requestBody: unknown;
-  error: DattoApiError;              // always mapped; never a raw axios error
+  error: DattoApiError;              // always a mapped DattoApiError; never the raw transport error
   statusCode?: number;              // present iff a response was received
   responseHeaders?: DattoHttpHeaders;
   responseBody?: unknown;
@@ -192,7 +192,8 @@ npm test
 npm run build
 grep -q 'DattoHttpObserver' dist/index.d.ts
 ! grep -q 'declare module' dist/index.d.ts
-! grep -iq 'axios' src/http/http-observer.ts
+! grep -Eq "from ['\"]axios['\"]" src/http/http-observer.ts
+! grep -Eq '\bAxios[A-Z]' src/http/http-observer.ts
 ```
 
 - `src/http/observer.ts` is not re-exported from `src/index.ts` (internal-only).
@@ -255,7 +256,7 @@ instance.interceptors.response.use(
 // inside handleResponseError, immediately after the isAxiosError guard:
 const cap = (error.config as RetryTrackedConfig | undefined)?.__dattoObserverCapture;
 if (cap && httpObserver) {
-  fireError(logger, httpObserver, cap, error, build403Error);
+  fireError(logger, httpObserver, cap, error, mapObserverError(error, build403Error));
 }
 ```
 
@@ -278,9 +279,12 @@ if (cap && httpObserver) {
 ```bash
 npm run typecheck
 npm test
+npm run build
+! grep -q 'declare module' dist/index.d.ts
 ```
 
 - Existing `http-client.test.ts` cases pass unchanged (no behavior regression).
+- `npm run build` + the `declare module` check run here because Phase 2 makes axios-importing `src/http/observer.ts` reachable from the `index.ts` value graph (via `http-client.ts`), so a leaked `declare module "axios"` would first surface at this phase. (No blanket `grep 'axios' dist/index.d.ts` — `dist/index.d.ts` already references `AxiosInstance`/`AxiosError` legitimately via `BaseResource.axios` / `DattoApiError.fromAxiosError`.)
 
 ---
 
@@ -352,9 +356,12 @@ const parsed = tokenResponseSchema.safeParse(response.data);
 ```bash
 npm run typecheck
 npm test
+npm run build
+! grep -q 'declare module' dist/index.d.ts
 ```
 
 - Existing `auth-manager.test.ts` cases pass unchanged.
+- `npm run build` + the `declare module` check run here because Phase 3 makes axios-importing `src/http/observer.ts` reachable from the `index.ts` value graph (via `auth-manager.ts`), so a leaked `declare module "axios"` would first surface at this phase. (No blanket `grep 'axios' dist/index.d.ts` — `dist/index.d.ts` already references `AxiosInstance`/`AxiosError` legitimately today.)
 
 ---
 
