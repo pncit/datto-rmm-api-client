@@ -42,7 +42,7 @@ The client exposes a transport-agnostic **HTTP observer seam**: a set of optiona
 | R2 | Each callback fires **once per physical HTTP attempt**; retries are never collapsed — a `429 → retry → 200` sequence surfaces as two observed attempts. | Functional | Goal: per-attempt fidelity |
 | R3 | The internal OAuth token grant/refresh call is observed, with its body delivered as the raw serialized `application/x-www-form-urlencoded` string as sent on the wire. | Functional | Goal: cover internal exchanges |
 | R4 | Each pagination page is observed as its own request plus terminal (`onResponse`/`onError`) event. | Functional | Goal: cover internal exchanges |
-| R5 | Request and response bodies are delivered as sent/received on the wire — the serialized string for form/urlencoded requests, the object/parsed form for JSON — never pre-parsed away from the wire form and never pre-redacted. | Functional | Goal: wire fidelity |
+| R5 | Request and response bodies are delivered in their developer-facing transport form, never pre-redacted: form/urlencoded requests (the grant) as the **serialized string** exactly as sent on the wire; JSON requests as the **pre-serialization object** (explicitly the object, not the literal serialized wire bytes); JSON responses as the parsed object. | Functional | Goal: wire fidelity |
 | R6 | `onResponse` fires for an attempt that receives a 2xx; `onError` fires for an attempt that receives any non-2xx **or** no response at all, carrying `statusCode` and response fields when a response was received. | Functional | Stakeholder decision |
 | R7 | A `throw` from any callback — and a rejection from an accidentally-async callback — is caught and swallowed and never alters, delays, or fails the request; callbacks are invoked synchronously and their return value is ignored (never awaited). | Non-functional | Goal: observer cannot affect the request |
 | R8 | `onError`'s error field is typed and guaranteed to be a `DattoApiError`; the seam never delivers an unmapped error or a raw axios error, and no callback field's type references an axios type. | Non-functional | Non-Goal: axios stays out of the contract |
@@ -86,7 +86,7 @@ Every callback invocation is wrapped so that any thrown error or returned-promis
 - **HTTP attempt** — one physical dispatch of one request to the server. A logical operation may comprise several attempts (retries); a paginated read comprises one attempt per page; obtaining a token is its own attempt. The seam is defined per attempt, not per logical operation.
 - **`DattoHttpObserver`** — the public interface grouping the three optional pure-observer callbacks. Exported from `src/index.ts` alongside `DattoLogger`.
 - **Terminal event** — each observed attempt emits exactly one of `onResponse` (2xx) or `onError` (non-2xx or no response), in addition to its one `onRequest`. There is no attempt that emits both a response and an error event, and none that emits neither.
-- **Wire fidelity** — bodies are delivered in the form they are serialized to for transport: the `x-www-form-urlencoded` string for the grant call, the JSON request object for JSON writes (the parsed response object for responses). Headers are delivered as a plain `Record<string, string | string[] | undefined>`, with axios's `AxiosHeaders` normalized away.
+- **Wire fidelity** — bodies are delivered in their developer-facing transport form: the serialized `x-www-form-urlencoded` string for the grant call, the pre-serialization request object for JSON writes (and the parsed object for responses), never pre-redacted (R5). Headers are delivered as a plain `Record<string, string | string[] | undefined>`, with axios's `AxiosHeaders` normalized away.
 
 ### Callback payloads
 
@@ -97,8 +97,8 @@ interface DattoHttpObserver {
   onRequest?(event: {
     method: string;
     url: string;
-    headers: Record<string, string | string[] | undefined>;
-    body: unknown; // wire-form: the urlencoded string for the grant, the request object for JSON
+    headers: Record<string, string | string[] | undefined>; // shared-instance requests carry Authorization: Bearer; the grant's Authorization: Basic (public-client:public) is applied by axios internally and is absent by design
+    body: unknown; // the serialized urlencoded string for the grant, the pre-serialization request object for JSON (Decision 5, R5)
   }): void;
 
   onResponse?(event: {
@@ -168,14 +168,21 @@ interface DattoHttpObserver {
 - `error: unknown` (the consumer's literal proposal): rejected — under-claims a shape the client can guarantee, giving worse ergonomics for no benefit. The consumer invited a stronger type.
 - `error: DattoApiError | DattoValidationError`: rejected — `DattoValidationError` is a post-exchange, non-HTTP failure outside this seam's scope; including it in the type would imply the seam fires on validation failures, which it does not.
 
-#### Decision 5: `onRequest` fires at dispatch; `durationMs` is wire time
+#### Decision 5: `onRequest` fires at dispatch; `durationMs` is wire time; request fields are captured-and-stashed
 
-**Decision:** `onRequest` fires immediately before the attempt is dispatched — after rate-limit acquisition and after the auth/User-Agent/Content-Type headers are attached — and `durationMs` measures from that dispatch to the response (or error), excluding any rate-limiter throttle wait.
+**Decision:** `onRequest` fires immediately before the attempt is dispatched — after rate-limit acquisition and after the auth/User-Agent/Content-Type headers are attached — and `durationMs` measures from that dispatch to the response (or error), excluding any rate-limiter throttle wait. On the shared instance this "post-throttle, post-auth" firing point is achieved by a specific mechanism: the observer's request interceptor is registered **first** inside `createHttpClient`, so that under axios's LIFO (reverse-registration) request-interceptor ordering it executes **last** — after the rate-limit interceptor and after the Bearer interceptor that `AuthManager.attachTo` registers later, from a separate module, on the already-built instance. Registering it in any other position would run it before the auth header is attached and observe an incomplete request.
 
-**Rationale:** Firing after header attachment means `onRequest` observes the final on-the-wire headers (including the bearer token), and firing after rate-limit acquisition means `durationMs` reflects the network round-trip rather than time spent queued behind the throttle. This is the most faithful representation of the actual exchange for an audit artifact.
+At the moment it fires, `onRequest` **captures** the method, URL, headers, and body and **stashes** that captured payload — alongside the dispatch timestamp — on the per-attempt internal request state (the `axios-augment.d.ts` `rateDescriptor` precedent). The terminal events reuse the stashed payload: `onResponse`/`onError` populate their `requestHeaders`/`requestBody` from what `onRequest` captured, **not** by re-reading `response.config`. This matters because by the terminal event axios has already run `transformRequest` (overwriting `config.data` with the serialized body) and normalized `config.headers` to `AxiosHeaders`; re-reading them would yield the serialized JSON string instead of the object R5 intends and post-normalization headers that need not match what `onRequest` observed. The dispatch timestamp is taken **after** `rateLimiter.acquire` returns, so throttle wait is never folded into `durationMs`.
+
+The grant path carries no interceptors (Decision 2), so it captures-and-stashes at its own dispatch point inside `performRefresh` — the same capture-and-stash rule, applied directly at the call site rather than through an interceptor.
+
+The header contract has one documented exception on the grant call: `Authorization: Bearer` is present on shared-instance requests, but the grant's `Authorization: Basic` header (the non-secret `public-client:public` pair) is applied by axios internally from the per-request `auth:` option and is therefore **absent by design** from the captured header map. The security-relevant credential on the grant is the API key, which rides in the captured body and is captured faithfully.
+
+**Rationale:** Firing after header attachment means `onRequest` observes the final on-the-wire headers (including the bearer token), and firing after rate-limit acquisition means `durationMs` reflects the network round-trip rather than time spent queued behind the throttle. Capturing at `onRequest` and reusing the stash keeps a single attempt's request fields identical across its `onRequest` and terminal events, at the form R5 specifies. This is the most faithful representation of the actual exchange for an audit artifact.
 
 **Alternatives considered:**
 - Fire `onRequest` at call entry (before throttle/auth): rejected — headers would be incomplete and `durationMs` would fold in throttle wait, misrepresenting the exchange.
+- Re-read request fields off `response.config` at the terminal event instead of stashing: rejected — axios has by then serialized the body and normalized the headers, so the terminal `requestBody`/`requestHeaders` would diverge from what `onRequest` delivered and from R5's intended form.
 
 #### Decision 6: Raw delivery — an explicit exemption from the masking boundary
 
@@ -191,7 +198,9 @@ interface DattoHttpObserver {
 
 `dattoRmmClientConfigSchema` gains an optional `httpObserver` validated shape-only — a strict object whose three callbacks are optional function schemas — mirroring `dattoLoggerSchema`'s approach (validate structure, not behavior) and preserving the strict-object rejection of unknown keys and `axiosInstance` (R10). `DattoRmmClient` passes the validated observer into both `createHttpClient`'s config and `AuthManager`'s config (a new optional field on each), threaded raw (not through `withUdfMasking`).
 
-The private `rateDescriptor` augmentation pattern (`src/http/axios-augment.d.ts`) — an internal typecheck aid deliberately kept out of the published `dist/index.d.ts` — is the precedent for any per-attempt state the instrumentation stashes on the request config (e.g. the dispatch timestamp for `durationMs`); such state stays internal and never reaches the published types.
+On the shared instance the observer's request interceptor is registered **first** in `createHttpClient` so that, under axios's LIFO request-interceptor ordering, it runs **last** — after the rate-limit interceptor and after the Bearer interceptor `AuthManager.attachTo` registers later (Decision 5).
+
+The private `rateDescriptor` augmentation pattern (`src/http/axios-augment.d.ts`) — an internal typecheck aid deliberately kept out of the published `dist/index.d.ts` — is the precedent for the per-attempt state the instrumentation stashes on the request config: the dispatch timestamp for `durationMs` **and** the captured request payload (method/url/headers/body) that the terminal events reuse (Decision 5). Such state stays internal and never reaches the published types.
 
 ---
 
@@ -216,7 +225,10 @@ None.
 - A `429 → retry → 200` sequence invokes `onRequest` twice and yields `onError(429)` then `onResponse(200)` — two observed attempts.
 - The OAuth token grant/refresh call invokes the observer, with `body`/`requestBody` equal to the raw `application/x-www-form-urlencoded` string.
 - A paginated read of N pages invokes the observer N times (one request + one terminal event per page).
-- A JSON write delivers its body as the request object; the grant delivers its body as the serialized string.
+- A JSON write delivers its body as the pre-serialization request object; the grant delivers its body as the serialized urlencoded string.
+- An attempt's terminal event (`onResponse`/`onError`) carries `requestHeaders`/`requestBody` identical to what `onRequest` observed for the same attempt — the stashed capture, not the serialized/normalized `response.config` values.
+- The observed shared-instance request carries the `Authorization: Bearer` header; the grant's captured header map omits `Authorization` (the Basic header applied internally by axios), with the API key present in the captured body.
+- `durationMs` measures dispatch→response and excludes rate-limiter throttle wait: an injected throttle delay before dispatch is not folded into `durationMs`.
 - `onError.error` is a `DattoApiError` in every case, including transport failures (`statusCode` absent) and mapped HTTP failures (`statusCode` present).
 - A callback that throws, or returns a rejected promise, does not alter, delay, or fail the request; the failure is logged once at `warn`.
 - The config schema still rejects `axiosInstance` and other unknown keys.
@@ -224,7 +236,7 @@ None.
 ### Verification
 
 - `npm run typecheck` — the public surface compiles and exports `DattoHttpObserver` with no axios type in its signatures.
-- `npm test` — existing suites pass unchanged; new unit tests cover per-attempt firing (retry, pagination, grant), 2xx/non-2xx/transport-failure terminal selection, raw body/header fidelity, `DattoApiError` typing, and observer-throw isolation.
+- `npm test` — existing suites pass unchanged; new unit tests cover per-attempt firing (retry, pagination, grant), 2xx/non-2xx/transport-failure terminal selection, raw body/header fidelity, `DattoApiError` typing, and observer-throw isolation. Specifically: the observed shared-instance request carries `Authorization: Bearer`; the terminal event's `requestBody`/`requestHeaders` match the values `onRequest` captured for the same attempt (not the serialized/normalized `response.config`); the grant's captured headers omit `Authorization` while the body carries the API key; and an injected pre-dispatch throttle delay is excluded from `durationMs`.
 - Confirm `dist/index.d.ts` contains no `declare module "axios"` and no axios type in the observer signatures (the existing Phase 8 exit-gate check extended to the new surface).
 
 ### What Stays the Same
