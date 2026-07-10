@@ -1,7 +1,11 @@
 import { AxiosError, AxiosHeaders, type AxiosResponse } from "axios";
 import { describe, expect, it, vi } from "vitest";
 
-import type { DattoHttpErrorEvent, DattoHttpObserver } from "@/http/http-observer";
+import {
+  dattoHttpObserverSchema,
+  type DattoHttpErrorEvent,
+  type DattoHttpObserver,
+} from "@/http/http-observer";
 import {
   captureRequest,
   fireError,
@@ -178,6 +182,72 @@ describe("invokeObserver", () => {
     invokeObserver(logger, "onRequest", fn, {});
 
     expect(settled).toBe(false);
+  });
+});
+
+describe("invokeObserver on a schema-parsed callback (R7 regression — f1/f2)", () => {
+  // These callbacks are obtained THROUGH dattoHttpObserverSchema.parse, not hand-built raw
+  // functions — this is the path the wired client actually uses (validated.httpObserver).
+  // A wrapping/validating schema (e.g. zod's z.function) would defeat R7 here; this test must
+  // fail against such a schema and pass against a non-wrapping, shape-only one.
+
+  it("does not warn when a parsed callback returns a non-undefined value", () => {
+    const logger = fakeLogger();
+    const received: unknown[] = [];
+    const parsed = dattoHttpObserverSchema.parse({
+      // Idiomatic value-returning callback: Array#push returns the new length (a number).
+      onRequest: (event: unknown) => received.push(event),
+    });
+
+    invokeObserver(logger, "onRequest", parsed.onRequest, { some: "event" });
+
+    expect(received).toEqual([{ some: "event" }]);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("produces no unhandled rejection and exactly one warn for a parsed async-rejecting callback", async () => {
+    const logger = fakeLogger();
+    const parsed = dattoHttpObserverSchema.parse({
+      onResponse: async () => {
+        throw new Error("async boom");
+      },
+    });
+
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+
+    try {
+      expect(() =>
+        invokeObserver(logger, "onResponse", parsed.onResponse, {
+          some: "event",
+        }),
+      ).not.toThrow();
+
+      // Flush the microtask queue so any attached/unhandled rejection surfaces.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+
+    expect(unhandledRejections).toHaveLength(0);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("onResponse"),
+      expect.objectContaining({ callback: "onResponse" }),
+    );
+  });
+
+  it("delivers the consumer's original function reference, unchanged, through parse", () => {
+    const onRequest = (event: unknown): void => {
+      void event;
+    };
+
+    const parsed = dattoHttpObserverSchema.parse({ onRequest });
+
+    expect(parsed.onRequest).toBe(onRequest);
   });
 });
 

@@ -122,6 +122,26 @@ second, parallel test file for the same schema, which would fragment coverage of
 across two files with no organizational benefit. This preserves the plan's intent (extend the
 config-schema test suite with `httpObserver` cases) while following the repo's actual layout.
 
+**`observerCallbackSchema` does not use `z.function` (deviates from plan lines 9/57's mandated
+form; added during Findings Resolution round 1, implementation-auditor-r1-f1).** The plan's
+Assumption (line 9) and Step 1 Notes (line 57) specify mirroring `dattoLoggerSchema`'s
+`z.function({ input, output: z.void() })` shape-only form so the callbacks stay "pass-through
+(invocable, un-wrapped)". Empirically, against the repo's installed `zod@4.4.3`, that form does
+**not** do this: `z.function(...).parse(fn)` returns a validating proxy, not `fn` itself
+(`schema.parse(fn) === fn` is `false`), and the proxy throws a synchronous `ZodError` at call
+time whenever the callback returns a non-`undefined` value or an about-to-reject thenable —
+which defeats R7 (an accidentally-async callback's rejection never reaches `invokeObserver`'s
+`.then(undefined, …)` handler; it escapes as an unhandled rejection instead) and the R9 raw
+pass-through guarantee (the delivered callback is a proxy, not the consumer's reference). This
+is safe for `dattoLoggerSchema` only because every logger method is internal, void-returning,
+and never async — a distinction the plan's Assumption did not account for. Replaced
+`observerCallbackSchema` with `z.custom<(event: never) => unknown>((v) => typeof v ===
+"function")`, which validates shape only and returns the input unchanged on success, so
+`invokeObserver` (not the schema) owns return-value and async-rejection tolerance, per R7's
+actual design intent. `.strictObject`, `.optional()`, and the existing "reject a non-function
+callback" / "reject unknown key" behaviors are all unchanged. `dattoLoggerSchema` itself is left
+untouched — it is out of Phase 1 scope and its usage does not trigger the defect.
+
 No other deviations. All five Phase 1 steps, the internal helper's complete primitive set, and
 the three specified test files/targets were implemented as specified.
 

@@ -64,7 +64,10 @@ describe("dattoRmmClientConfigSchema", () => {
     const rawEvent = { secret: "bearer-token-value" };
     httpObserver?.onRequest?.(rawEvent as never);
 
-    expect(received).toEqual([rawEvent]);
+    // Identity, not just structural equality: parsing must neither clone the payload nor
+    // substitute the callback with a wrapper that reconstructs its argument.
+    expect(received).toHaveLength(1);
+    expect(received[0]).toBe(rawEvent);
   });
 
   it("rejects an httpObserver carrying an unknown key", () => {

@@ -102,11 +102,23 @@ export interface DattoHttpObserver {
 
 /**
  * Shape-only schema for a single observer callback: validates that a supplied value is callable,
- * without constraining what it does with its argument (mirrors {@link dattoLoggerSchema}'s
- * per-method `z.function` approach in `../logging/logger.ts`).
+ * without constraining what it does with its argument or its return value.
+ *
+ * This deliberately does **not** mirror {@link dattoLoggerSchema}'s per-method `z.function`
+ * approach (`../logging/logger.ts`). In the installed `zod` (4.x), `z.function(...).parse(fn)`
+ * does not hand back `fn` itself — it returns a *validating proxy* that (a) is not identity-equal
+ * to the supplied function and (b) throws a synchronous `ZodError` at call time if the callback
+ * returns anything other than `undefined`, including a rejected promise from an async callback
+ * (the rejection never reaches the caller as a promise — the proxy throws before returning it).
+ * That is safe for `dattoLoggerSchema` only because every logger method is internal, void-
+ * returning, and never async; it is incompatible with `DattoHttpObserver`, whose R7 guarantee
+ * ("a rejection from an accidentally-async callback can never leak as an unhandled rejection")
+ * requires `invokeObserver` (`./observer.ts`) — not the schema — to see and handle the callback's
+ * actual return value. `z.custom` returns the input unchanged on success, so the raw function
+ * reference the consumer supplied is what gets delivered.
  */
 const observerCallbackSchema = z
-  .function({ input: [z.any()], output: z.void() })
+  .custom<(event: never) => unknown>((value) => typeof value === "function")
   .optional();
 
 /**
