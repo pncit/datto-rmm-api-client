@@ -1,5 +1,10 @@
 {
-  "rulings": {},
+  "rulings": {
+    "plan:p1": {
+      "plan-auditor-r1-f1": "Mediator ruling: Pin `fireError` to one signature `fireError(logger, observer, capture, rawError, mappedError: DattoApiError)` \u2014 every caller pre-maps. Shared instance uses `mapObserverError(error, build403Error)`; grant uses its own `mapped`. Edit Phase 1 S5's prose to drop \"`fireError` maps a status of `403`\u2026 via `fromAxiosError`\" (that logic moves to `mapObserverError`, which the plan already defines) and edit the Phase 2 example (line 258) to pre-map rather than pass `build403Error`.",
+      "plan-auditor-r1-f4": "Mediator ruling: Add `npm run build` and `! grep -q 'declare module' dist/index.d.ts` to the Phase 2 **and** Phase 3 Exit Gates \u2014 those are the phases that first make axios-importing `src/http/observer.ts` reachable from the `index.ts` value graph, so a leaked `declare module` should be caught there, not two phases downstream at Phase 4. Do **not** add a blanket `grep 'axios' dist/index.d.ts`: `dist/index.d.ts` already references `AxiosInstance`/`AxiosError` legitimately today (16 refs, verified) via `BaseResource.axios` / `DattoApiError.fromAxiosError`, so that check would fail. The `! grep -iq 'axios' src/http/http-observer.ts` source check need not be added to Phase 2/3 \u2014 that file isn't edited there."
+    }
+  },
   "events": [
     {
       "t": 1783715171,
@@ -769,6 +774,114 @@
       },
       "session_id": "dd5009b4-fa74-4c25-b9ef-3eef55b0bd14",
       "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/design-process-artifact.md"
+    },
+    {
+      "t": 1783718273,
+      "kind": "worker",
+      "agent": "planner",
+      "label": "planner Mode A",
+      "ok": true,
+      "started_at": "2026-07-10T21:11:23+00:00",
+      "duration_s": 390.1,
+      "api_duration_s": 382.6,
+      "turns": 24,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.9371,
+      "tokens": {
+        "input": 694,
+        "output": 29194,
+        "cache_read": 637464,
+        "cache_creation": 88504
+      },
+      "session_id": "6d3d1fc1-acba-4d60-8b9b-3cf2666f0d45",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/plan.md"
+    },
+    {
+      "t": 1783718273,
+      "kind": "respawn_set",
+      "loop": "plan:p1",
+      "size": 1,
+      "confirmation": false
+    },
+    {
+      "t": 1783718643,
+      "kind": "worker",
+      "agent": "plan-auditor",
+      "label": "plan:p1 plan-auditor r1",
+      "ok": true,
+      "started_at": "2026-07-10T21:17:53+00:00",
+      "duration_s": 369.4,
+      "api_duration_s": 362.8,
+      "turns": 21,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 1.7226,
+      "tokens": {
+        "input": 686,
+        "output": 26477,
+        "cache_read": 441527,
+        "cache_creation": 83646
+      },
+      "session_id": "463a9cfc-aac3-4fcd-958c-8d9d6a44be3b",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/review-plan/plan-auditor-r1.md"
+    },
+    {
+      "t": 1783718819,
+      "kind": "worker",
+      "agent": "mediator",
+      "label": "plan:p1 triage r1",
+      "ok": true,
+      "started_at": "2026-07-10T21:24:03+00:00",
+      "duration_s": 176.1,
+      "api_duration_s": 166.8,
+      "turns": 8,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.7792,
+      "tokens": {
+        "input": 682,
+        "output": 12031,
+        "cache_read": 123511,
+        "cache_creation": 41322
+      },
+      "session_id": "63b58118-86b5-4da2-ad36-e33f405f2866",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/review-plan/triage-r1.md"
+    },
+    {
+      "t": 1783718819,
+      "kind": "triage_spawn",
+      "loop": "plan:p1",
+      "k": 1,
+      "variant": "initial"
+    },
+    {
+      "t": 1783718819,
+      "kind": "ruling_recorded",
+      "loop": "plan:p1",
+      "finding": "plan-auditor-r1-f1",
+      "source": "triage"
+    },
+    {
+      "t": 1783718819,
+      "kind": "ruling_recorded",
+      "loop": "plan:p1",
+      "finding": "plan-auditor-r1-f4",
+      "source": "triage"
+    },
+    {
+      "t": 1783718819,
+      "kind": "triage_routes",
+      "loop": "plan:p1",
+      "k": 1,
+      "remediate": 0,
+      "challenge": 0,
+      "ruled": 2,
+      "human": 2,
+      "challenge_capped": 0
     }
   ],
   "amendments": {},
@@ -780,5 +893,11 @@
       "docs/implementation/http-observer-seam/design.md"
     ],
     "cwd": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client"
+  },
+  "pending_human": {
+    "plan:p1": [
+      "plan-auditor-r1-f2",
+      "plan-auditor-r1-f3"
+    ]
   }
 }
