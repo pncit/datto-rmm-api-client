@@ -2,7 +2,9 @@
   "rulings": {
     "plan:p1": {
       "plan-auditor-r1-f1": "Mediator ruling: Pin `fireError` to one signature `fireError(logger, observer, capture, rawError, mappedError: DattoApiError)` \u2014 every caller pre-maps. Shared instance uses `mapObserverError(error, build403Error)`; grant uses its own `mapped`. Edit Phase 1 S5's prose to drop \"`fireError` maps a status of `403`\u2026 via `fromAxiosError`\" (that logic moves to `mapObserverError`, which the plan already defines) and edit the Phase 2 example (line 258) to pre-map rather than pass `build403Error`.",
-      "plan-auditor-r1-f4": "Mediator ruling: Add `npm run build` and `! grep -q 'declare module' dist/index.d.ts` to the Phase 2 **and** Phase 3 Exit Gates \u2014 those are the phases that first make axios-importing `src/http/observer.ts` reachable from the `index.ts` value graph, so a leaked `declare module` should be caught there, not two phases downstream at Phase 4. Do **not** add a blanket `grep 'axios' dist/index.d.ts`: `dist/index.d.ts` already references `AxiosInstance`/`AxiosError` legitimately today (16 refs, verified) via `BaseResource.axios` / `DattoApiError.fromAxiosError`, so that check would fail. The `! grep -iq 'axios' src/http/http-observer.ts` source check need not be added to Phase 2/3 \u2014 that file isn't edited there."
+      "plan-auditor-r1-f4": "Mediator ruling: Add `npm run build` and `! grep -q 'declare module' dist/index.d.ts` to the Phase 2 **and** Phase 3 Exit Gates \u2014 those are the phases that first make axios-importing `src/http/observer.ts` reachable from the `index.ts` value graph, so a leaked `declare module` should be caught there, not two phases downstream at Phase 4. Do **not** add a blanket `grep 'axios' dist/index.d.ts`: `dist/index.d.ts` already references `AxiosInstance`/`AxiosError` legitimately today (16 refs, verified) via `BaseResource.axios` / `DattoApiError.fromAxiosError`, so that check would fail. The `! grep -iq 'axios' src/http/http-observer.ts` source check need not be added to Phase 2/3 \u2014 that file isn't edited there.",
+      "plan-auditor-r1-f2": "Modify plan.md: 1) Narrow the gate \u2014 e.g.  ! grep -Eq from [\\\"]axios[\"] src/http/http-observer.ts  plus an optional  ! grep -Eq '\\bAxios[A-Z]' \u2026  type check: precise, tolerates explanatory prose, still catches a real leak. AND 2) strip axios from the example.",
+      "plan-auditor-r1-f3": "Update the design: Accept  index.ts-direct and amend the design to say the observer types export directly from  index.ts  alongside  DattoLogger"
     }
   },
   "events": [
@@ -882,6 +884,73 @@
       "ruled": 2,
       "human": 2,
       "challenge_capped": 0
+    },
+    {
+      "t": 1783719861,
+      "kind": "ruling_recorded",
+      "loop": "plan:p1",
+      "finding": "plan-auditor-r1-f2",
+      "source": "human"
+    },
+    {
+      "t": 1783719861,
+      "kind": "ruling_recorded",
+      "loop": "plan:p1",
+      "finding": "plan-auditor-r1-f3",
+      "source": "human"
+    },
+    {
+      "t": 1783719949,
+      "kind": "worker",
+      "agent": "mediator",
+      "label": "plan:p1 triage r2 (delta)",
+      "ok": true,
+      "started_at": "2026-07-10T21:44:24+00:00",
+      "duration_s": 84.8,
+      "api_duration_s": 79.9,
+      "turns": 5,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.3169,
+      "tokens": {
+        "input": 676,
+        "output": 5581,
+        "cache_read": 31766,
+        "cache_creation": 15808
+      },
+      "session_id": "e673a768-3daf-42cd-980e-79580ba5eb62",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/review-plan/triage-r2.md"
+    },
+    {
+      "t": 1783719980,
+      "kind": "worker",
+      "agent": "repair",
+      "label": "repair triage-r2.md",
+      "ok": true,
+      "started_at": "2026-07-10T21:45:49+00:00",
+      "duration_s": 30.9,
+      "api_duration_s": 25.0,
+      "turns": 2,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 0.095,
+      "tokens": {
+        "input": 74,
+        "output": 1979,
+        "cache_read": 37493,
+        "cache_creation": 2640
+      },
+      "session_id": "e673a768-3daf-42cd-980e-79580ba5eb62",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/review-plan/triage-r2.md"
+    },
+    {
+      "t": 1783719980,
+      "kind": "triage_spawn",
+      "loop": "plan:p1",
+      "k": 2,
+      "variant": "delta"
     }
   ],
   "amendments": {},
@@ -894,10 +963,5 @@
     ],
     "cwd": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client"
   },
-  "pending_human": {
-    "plan:p1": [
-      "plan-auditor-r1-f2",
-      "plan-auditor-r1-f3"
-    ]
-  }
+  "pending_human": {}
 }
