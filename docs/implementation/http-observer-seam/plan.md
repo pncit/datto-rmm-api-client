@@ -54,7 +54,7 @@ Establish the seam's contract and shared plumbing without changing any request b
 ### Steps
 1. **Author the public types + shape-only schema**: Create `src/http/http-observer.ts` with `DattoHttpHeaders`, `DattoHttpRequestEvent`, `DattoHttpResponseEvent`, `DattoHttpErrorEvent`, `DattoHttpObserver`, and `dattoHttpObserverSchema`.
    - Files: `src/http/http-observer.ts` (new)
-   - Notes: This file **must not import axios** (gated). `error: DattoApiError` imports the error type from `../errors` (a non-axios type). The schema mirrors `dattoLoggerSchema` exactly — `z.strictObject` of three optional `z.function` fields. Document the raw-delivery contract prominently in the `DattoHttpObserver` doc comment (Risk mitigation: consumer must redact; payloads carry bearer tokens and the API key).
+   - Notes: This file **must not import axios** (gated). `onError`'s `error` field is typed `unknown` — the raw request error is handed off as-is, so no error type needs importing (Decision 4 / R8 per the engineer-r1-f1 ruling). The schema mirrors `dattoLoggerSchema` exactly — `z.strictObject` of three optional `z.function` fields. Document the raw-delivery contract prominently in the `DattoHttpObserver` doc comment (Risk mitigation: consumer must redact; payloads carry bearer tokens and the API key), and note on the `error` field that it is the raw thrown value (`unknown`), never a mapped/re-derived error.
 2. **Accept `httpObserver` in the strict config schema**: Add `httpObserver: dattoHttpObserverSchema.optional()` to `dattoRmmClientConfigSchema`.
    - Files: `src/client/datto-client-config.ts`
    - Notes: `.strictObject` continues to reject `axiosInstance` and unknown keys (R10). Add a `.describe(...)` noting raw, unmasked delivery (unlike the logger).
@@ -64,15 +64,19 @@ Establish the seam's contract and shared plumbing without changing any request b
 4. **Extend the private axios augmentation with the per-attempt stash**: Add an optional `__dattoObserverCapture?: ObserverCapture` field to both `AxiosRequestConfig` and `InternalAxiosRequestConfig` in `src/http/axios-augment.d.ts`, importing `ObserverCapture` as a type from `./observer`.
    - Files: `src/http/axios-augment.d.ts`
    - Notes: Keep this file un-imported by any value module (its existing doc explains why). The stash holds the captured request payload (`method`/`url`/`headers`/`body`) plus the dispatch timestamp.
-5. **Create the internal observer helper**: Create `src/http/observer.ts` exporting `ObserverCapture` (internal type), `normalizeHeaders`, `invokeObserver` (swallow-wrapper), and the event-assembly/fire helpers (`fireRequest`, `fireResponse`, `fireError`) that build a `DattoHttp*Event` from a stash + response/error and route each callback through `invokeObserver`.
+5. **Create the internal observer helper**: Create `src/http/observer.ts`. Its **complete** exported surface is exactly these primitives — and **both instrumentation sites (Phase 2 interceptor, Phase 3 `performRefresh`) route through them; neither hand-builds a capture inline nor maps an error site-locally**, so the two sites cannot drift (design Decision 2):
+   - `ObserverCapture` (internal type): `{ method, url, headers, body, startedAt }`.
+   - `normalizeHeaders(headers: unknown): DattoHttpHeaders` — the sole `AxiosHeaders`→plain-`Record` normalizer.
+   - `captureRequest({ method, url, headers, body }): ObserverCapture` — **the shared capture-and-stash assembler** (design Decision 2; engineer-r1-f3 ruling). It owns method-uppercasing (`(method ?? "get").toUpperCase()`), header normalization (via `normalizeHeaders`), and stamps `startedAt = Date.now()`. Callers pass the **absolute resolved** `url` (architect-r1-f2). Both sites build every capture through this one function so uppercasing/normalization can never diverge.
+   - `invokeObserver(logger, callbackName, fn, event)` — the swallow-wrapper; `callbackName` is `"onRequest" | "onResponse" | "onError"` and is included in the swallow `warn` (message and `meta`) so a swallowed failure is attributable (engineer-r1-f5 ruling).
+   - `fireRequest`, `fireResponse`, `fireError` — build the matching `DattoHttp*Event` from a capture (+ response/error) and route the callback through `invokeObserver`. Each accepts `observer: DattoHttpObserver | undefined` and is a no-op when it is absent.
    - Files: `src/http/observer.ts` (new)
-   - Notes: Internal-only — never re-exported from `index.ts`, so it never reaches `dist/index.d.ts` (like `axios-augment.d.ts`). `invokeObserver` calls the callback synchronously in a `try/catch`; on a synchronous `throw` it logs one `warn` and swallows; when the return value is thenable it attaches a `.catch` (without awaiting) that logs one `warn` and swallows (R7). `fireError` has one pinned signature — `fireError(logger, observer, capture, rawError, mappedError: DattoApiError)` — taking an already-mapped `DattoApiError` as its 5th argument; **every caller pre-maps** (the shared instance via `mapObserverError(error, build403Error)`, the grant via its own `mapped`), so `fireError` never maps internally. It includes `statusCode`/`responseHeaders`/`responseBody` **only when a response was received** (R8).
+   - Notes: Internal-only — never re-exported from `index.ts`, so it never reaches `dist/index.d.ts` (like `axios-augment.d.ts`). `invokeObserver` calls the callback synchronously in a `try/catch`; on a synchronous `throw` it logs one `warn` (naming the callback) and swallows; when the return value is thenable it attaches a `.catch` (without awaiting) that logs one `warn` and swallows (R7). **There is no `mapObserverError` and no error-mapping in this module** — under the engineer-r1-f1 ruling `onError.error` is `unknown`. `fireError`'s pinned signature is `fireError(logger, observer, capture, rawError: unknown)`: it passes `rawError` **straight through** to `onError.error` unchanged (no pre-map, no 5th `mappedError` argument). It populates `statusCode`/`responseHeaders`/`responseBody` **only when a response is present**, narrowing via `axios.isAxiosError(rawError) && rawError.response` (or structural `rawError.response`); a non-axios `rawError` (the grant's transport-failure case) yields **no** response fields (R8/R6).
 
 ### Opinionated Implementation Notes (Examples)
 ```typescript
 // src/http/http-observer.ts
 import { z } from "zod";
-import type { DattoApiError } from "../errors";
 
 export type DattoHttpHeaders = Record<string, string | string[] | undefined>;
 
@@ -93,7 +97,7 @@ export interface DattoHttpResponseEvent {
 export interface DattoHttpErrorEvent {
   method: string; url: string;
   requestHeaders: DattoHttpHeaders; requestBody: unknown;
-  error: DattoApiError;              // always a mapped DattoApiError; never the raw transport error
+  error: unknown;                    // the raw request error, handed off as-is (Decision 4 / R8)
   statusCode?: number;              // present iff a response was received
   responseHeaders?: DattoHttpHeaders;
   responseBody?: unknown;
@@ -123,10 +127,17 @@ export const dattoHttpObserverSchema = z.strictObject({
 
 ```typescript
 // src/http/observer.ts  (INTERNAL — never exported from index.ts)
-import axios, { type AxiosError, type AxiosResponse } from "axios";
-import { DattoApiError } from "../errors";
+import axios, { type AxiosResponse } from "axios";
 import type { DattoLogger } from "../logging/logger";
-import type { DattoHttpObserver, DattoHttpHeaders } from "./http-observer";
+import type {
+  DattoHttpObserver,
+  DattoHttpHeaders,
+  DattoHttpRequestEvent,
+  DattoHttpResponseEvent,
+  DattoHttpErrorEvent,
+} from "./http-observer";
+
+type ObserverCallbackName = "onRequest" | "onResponse" | "onError";
 
 export interface ObserverCapture {
   method: string;
@@ -146,9 +157,30 @@ export function normalizeHeaders(headers: unknown): DattoHttpHeaders {
   return { ...(raw as Record<string, string | string[] | undefined>) };
 }
 
+/**
+ * The single capture-and-stash assembler BOTH instrumentation sites route through (Decision 2),
+ * so method-uppercasing and header normalization can never drift between them. `url` must be the
+ * absolute resolved URL (baseURL + path) — the caller composes it (architect-r1-f2).
+ */
+export function captureRequest(args: {
+  method: string | undefined;
+  url: string;
+  headers: unknown;
+  body: unknown;
+}): ObserverCapture {
+  return {
+    method: (args.method ?? "get").toUpperCase(),
+    url: args.url,
+    headers: normalizeHeaders(args.headers),
+    body: args.body,
+    startedAt: Date.now(),
+  };
+}
+
 /** Invoke a callback so a throw or a returned rejection can never affect the request (R7). */
 export function invokeObserver(
   logger: DattoLogger | undefined,
+  callbackName: ObserverCallbackName,
   fn: ((event: never) => void) | undefined,
   event: unknown,
 ): void {
@@ -157,27 +189,86 @@ export function invokeObserver(
     const ret = (fn as (e: unknown) => unknown)(event);
     if (ret && typeof (ret as PromiseLike<unknown>).then === "function") {
       (ret as PromiseLike<unknown>).then?.(undefined, () =>
-        logger?.warn("httpObserver callback rejected; ignored"),
+        logger?.warn(`httpObserver ${callbackName} callback rejected; ignored`, {
+          callback: callbackName,
+        }),
       );
     }
   } catch {
-    logger?.warn("httpObserver callback threw; ignored");
+    logger?.warn(`httpObserver ${callbackName} callback threw; ignored`, {
+      callback: callbackName,
+    });
   }
 }
 
-/** Map an axios error to the guaranteed DattoApiError for onError (R8). */
-export function mapObserverError(
-  error: AxiosError<unknown>,
-  build403: (e: AxiosError) => DattoApiError,
-): DattoApiError {
-  return error.response?.status === 403
-    ? build403(error)
-    : DattoApiError.fromAxiosError(error);
+export function fireRequest(
+  logger: DattoLogger | undefined,
+  observer: DattoHttpObserver | undefined,
+  capture: ObserverCapture,
+): void {
+  if (!observer) return;
+  const event: DattoHttpRequestEvent = {
+    method: capture.method,
+    url: capture.url,
+    headers: capture.headers,
+    body: capture.body,
+  };
+  invokeObserver(logger, "onRequest", observer.onRequest, event);
+}
+
+export function fireResponse(
+  logger: DattoLogger | undefined,
+  observer: DattoHttpObserver | undefined,
+  capture: ObserverCapture,
+  response: AxiosResponse<unknown>,
+): void {
+  if (!observer) return;
+  const event: DattoHttpResponseEvent = {
+    method: capture.method,
+    url: capture.url,
+    requestHeaders: capture.headers,
+    requestBody: capture.body,
+    statusCode: response.status,
+    responseHeaders: normalizeHeaders(response.headers),
+    responseBody: response.data,
+    durationMs: Date.now() - capture.startedAt,
+  };
+  invokeObserver(logger, "onResponse", observer.onResponse, event);
+}
+
+/**
+ * Fire onError. `rawError` is handed STRAIGHT THROUGH to `onError.error` as `unknown` — no
+ * mapping (Decision 4 / R8). Response fields are populated ONLY when a response is present.
+ */
+export function fireError(
+  logger: DattoLogger | undefined,
+  observer: DattoHttpObserver | undefined,
+  capture: ObserverCapture,
+  rawError: unknown,
+): void {
+  if (!observer) return;
+  const response = axios.isAxiosError(rawError) ? rawError.response : undefined;
+  const event: DattoHttpErrorEvent = {
+    method: capture.method,
+    url: capture.url,
+    requestHeaders: capture.headers,
+    requestBody: capture.body,
+    error: rawError, // raw pass-through — never re-mapped
+    durationMs: Date.now() - capture.startedAt,
+    ...(response
+      ? {
+          statusCode: response.status,
+          responseHeaders: normalizeHeaders(response.headers),
+          responseBody: response.data,
+        }
+      : {}),
+  };
+  invokeObserver(logger, "onError", observer.onError, event);
 }
 ```
 
 ### Tests (in this phase)
-- `tests/unit/http/observer.test.ts` (new): `normalizeHeaders` flattens an `AxiosHeaders` instance to a plain record and passes a plain object through; `invokeObserver` (a) swallows a synchronous `throw` and logs exactly one `warn`, (b) swallows a returned rejected promise with one `warn` and produces **no** unhandled rejection, (c) is a no-op when the callback is `undefined`, (d) never awaits (returns synchronously even when the callback returns a slow-resolving promise).
+- `tests/unit/http/observer.test.ts` (new): `normalizeHeaders` flattens an `AxiosHeaders` instance to a plain record and passes a plain object through; `captureRequest` uppercases the method (`"get"` → `"GET"`), normalizes an `AxiosHeaders` argument, preserves the absolute `url` it is handed verbatim, and stamps a numeric `startedAt`; `invokeObserver` (a) swallows a synchronous `throw` and logs exactly one `warn` **whose message/`meta` names the failing callback** (e.g. `onResponse`), (b) swallows a returned rejected promise with one `warn` (also naming the callback) and produces **no** unhandled rejection, (c) is a no-op when the callback is `undefined`, (d) never awaits (returns synchronously even when the callback returns a slow-resolving promise); `fireError` delivers the **exact** `rawError` object it was handed to `onError.error` **unchanged** (identity-equal) for both an `AxiosError` and a plain non-axios `Error`, populates `statusCode`/`responseHeaders`/`responseBody` when the `AxiosError` carries a `response`, and populates **none** of those response fields for the non-axios error (R8/R6).
 - `tests/unit/client/datto-client-config.test.ts` (extend, or add if absent): a config carrying an `httpObserver` with all three raw callbacks passes `dattoRmmClientConfigSchema.safeParse` and the parsed callbacks are still invocable (round-trip / pass-through — proves shape-only validation does not neuter raw delivery); `axiosInstance` and unknown keys still fail validation (R10).
 - `tests/generated/surface-pin.ts` (extend): add positive type-only imports of the five observer types from `../../src/index` used in a typed position, proving they are exported (a removed export breaks `npm run typecheck`).
 
@@ -211,15 +302,15 @@ Make the shared instance (`createHttpClient`) fire the observer once per physica
 ### Steps
 1. **Add `httpObserver` to `HttpClientConfig`**: New optional field, threaded raw.
    - Files: `src/http/http-client.ts`
-   - Notes: Also thread the existing masked `logger` into `invokeObserver` for swallow-`warn` (already present on the config).
-2. **Register the observer request interceptor FIRST**: Inside `createHttpClient`, register the observer's request interceptor **before** the rate-limit interceptor so that under axios LIFO it runs **last** — after rate-limit acquisition and after the Bearer interceptor `AuthManager.attachTo` adds later. In it, capture-and-stash `{ method, url, headers: normalizeHeaders(requestConfig.headers), body: requestConfig.data, startedAt: Date.now() }` onto `requestConfig.__dattoObserverCapture` (unconditionally overwritten every pass), then fire `onRequest` from the stash.
+   - Notes: Also thread the existing masked `logger` into `invokeObserver` for swallow-`warn` (already present on the config). Add a doc comment on the new `httpObserver` field explicitly noting it is delivered **raw/unmasked** — unlike the adjacent masked `logger` field — so a future reader does not assume logger parity (engineer-r1-f8).
+2. **Register the observer request interceptor FIRST**: Inside `createHttpClient`, register the observer's request interceptor **before** the rate-limit interceptor so that under axios LIFO it runs **last** — after rate-limit acquisition and after the Bearer interceptor `AuthManager.attachTo` adds later. In it, build the capture through the **shared `captureRequest` assembler** (never inline) with the **absolute resolved** `url` — `` `${requestConfig.baseURL ?? ""}${requestConfig.url ?? ""}` `` (architect-r1-f2) — passing `requestConfig.method`, `requestConfig.headers`, and `requestConfig.data`; stash it onto `requestConfig.__dattoObserverCapture` (unconditionally overwritten every pass), then fire `onRequest` from the stash.
    - Files: `src/http/http-client.ts`
-   - Notes: Capture-and-stash runs whenever `httpObserver` is present, **not** gated on `onRequest` (Decision 5) — an `onError`-only consumer still gets a populated stash. `body` is `requestConfig.data` (the pre-serialization object, R5) because this interceptor runs before axios's `transformRequest`. Only register the interceptor at all when `httpObserver` is defined (zero overhead otherwise).
+   - Notes: Capture-and-stash runs whenever `httpObserver` is present, **not** gated on `onRequest` (Decision 5) — an `onError`-only consumer still gets a populated stash. `captureRequest` owns the method-uppercasing and `normalizeHeaders` call, so this site does **not** re-implement them inline (design Decision 2 / engineer-r1-f3). `body` is `requestConfig.data` (the pre-serialization object, R5) because this interceptor runs before axios's `transformRequest`. Only register the interceptor at all when `httpObserver` is defined (zero overhead otherwise).
 3. **Fire `onResponse` from the fulfilled response handler**: In the existing `instance.interceptors.response.use((response) => response, ...)`, when `response.config.__dattoObserverCapture` is present, fire `onResponse` with the stashed request fields, `response.status`, `normalizeHeaders(response.headers)`, `response.data`, and `durationMs = Date.now() - startedAt`.
    - Files: `src/http/http-client.ts`
-4. **Fire `onError` once per dispatched attempt in `handleResponseError`**: After the `if (!axios.isAxiosError(error)) throw error;` guard, if `error.config.__dattoObserverCapture` is present, fire `onError` with the stashed request fields, `mapObserverError(error, build403Error)`, and (when `error.response` exists) `statusCode`/`responseHeaders`/`responseBody`, plus `durationMs`. Leave all existing retry/throw logic below unchanged.
+4. **Fire `onError` once per dispatched attempt in `handleResponseError`**: Thread the observer into `handleResponseError` by adding **`httpObserver?: DattoHttpObserver` as its 6th positional parameter, inserted immediately before `error`** (after `logger`) — the new signature is `handleResponseError(instance, retryPolicy, onUnauthorized, logger, httpObserver, error)`, and the response-interceptor call site passes `config.httpObserver` in that slot. After the `if (!axios.isAxiosError(error)) throw error;` guard, read the stash **directly off the globally-augmented `error.config`** — `error.config?.__dattoObserverCapture` (the `axios-augment.d.ts` augment puts `__dattoObserverCapture` on `InternalAxiosRequestConfig`, so no cast through `RetryTrackedConfig` is needed — and `RetryTrackedConfig` does not carry that field). If the stash is present, fire `onError` with `fireError(logger, httpObserver, cap, error)` — the raw `AxiosError` is handed **straight through** to `onError.error` (no `mapObserverError`, no pre-map; engineer-r1-f1 ruling), and `fireError` itself adds `statusCode`/response fields when `error.response` exists. Leave all existing retry/throw logic below unchanged.
    - Files: `src/http/http-client.ts`
-   - Notes: Placing the fire **after** the guard is what excludes the two non-dispatched paths (rate-limiter reject; Bearer `getToken()` throwing a `DattoApiError`) — both are non-axios rejects the guard rethrows first (Decision 4 rule 2). Firing once here (the interceptor runs once per attempt) means a retried attempt fires its terminal `onError` before `instance.request(config)` re-dispatches and the request interceptor overwrites the stash for attempt N+1 (R2).
+   - Notes: Placing the fire **after** the guard is what excludes the two non-dispatched paths (rate-limiter reject; Bearer `getToken()` throwing a `DattoApiError`) — both are non-axios rejects the guard rethrows first (Decision 4 rule 2). Firing once here (the interceptor runs once per attempt) means a retried attempt fires its terminal `onError` before `instance.request(config)` re-dispatches and the request interceptor overwrites the stash for attempt N+1 (R2). The 6th-positional-param approach keeps `handleResponseError`'s stable signature; the options-object refactor is **not** mandated (engineer-r1-f7). Naming note: the stash field is `__datto`-prefixed (`__dattoObserverCapture`) whereas its `axios-augment.d.ts` sibling `rateDescriptor` is unprefixed — the `__datto` prefix is retained deliberately to mark this as private per-attempt instrumentation state (matching the `__dattoRetryCount`/`__dattoUnauthorizedRetried` retry keys), and the augment is kept (not switched to a local intersection) because design Decision 5 / Schema-and-wiring mandates the `rateDescriptor` augment precedent (engineer-r1-f6).
 5. **Thread the raw observer through the client**: In `DattoRmmClient`, pass `validated.httpObserver` into `createHttpClient`'s config **unmasked** (do not route through `withUdfMasking`).
    - Files: `src/client/datto-rmm-client.ts`
 
@@ -228,13 +319,13 @@ Make the shared instance (`createHttpClient`) fire the observer once per physica
 // createHttpClient — register observer FIRST so it runs LAST (post-throttle, post-auth).
 if (config.httpObserver) {
   instance.interceptors.request.use((requestConfig) => {
-    const capture: ObserverCapture = {
-      method: (requestConfig.method ?? "get").toUpperCase(),
-      url: requestConfig.url ?? "",
-      headers: normalizeHeaders(requestConfig.headers),
+    // Build EVERY capture through the shared assembler — never inline (Decision 2).
+    const capture = captureRequest({
+      method: requestConfig.method,
+      url: `${requestConfig.baseURL ?? ""}${requestConfig.url ?? ""}`, // absolute resolved URL
+      headers: requestConfig.headers,
       body: requestConfig.data, // pre-serialization object (R5)
-      startedAt: Date.now(),    // after throttle+auth → wire time only
-    };
+    });
     requestConfig.__dattoObserverCapture = capture; // unconditional overwrite
     fireRequest(config.logger, config.httpObserver, capture);
     return requestConfig;
@@ -245,7 +336,7 @@ if (config.httpObserver) {
 instance.interceptors.response.use(
   (response) => {
     const cap = response.config.__dattoObserverCapture;
-    if (cap && config.httpObserver) {
+    if (cap) {
       fireResponse(config.logger, config.httpObserver, cap, response);
     }
     return response;
@@ -253,10 +344,11 @@ instance.interceptors.response.use(
   (error) => handleResponseError(instance, retryPolicy, config.onUnauthorized, config.logger, config.httpObserver, error),
 );
 
-// inside handleResponseError, immediately after the isAxiosError guard:
-const cap = (error.config as RetryTrackedConfig | undefined)?.__dattoObserverCapture;
-if (cap && httpObserver) {
-  fireError(logger, httpObserver, cap, error, mapObserverError(error, build403Error));
+// inside handleResponseError, immediately after the isAxiosError guard.
+// Read the stash off the globally-augmented config directly — no RetryTrackedConfig cast.
+const cap = error.config?.__dattoObserverCapture;
+if (cap) {
+  fireError(logger, httpObserver, cap, error); // raw AxiosError handed straight through (R8)
 }
 ```
 
@@ -266,7 +358,8 @@ if (cap && httpObserver) {
   - `429 (Retry-After) → 200` fires `onRequest` twice and yields `onError(statusCode 429)` then `onResponse(statusCode 200)` — two observed attempts (R2/R6).
   - A JSON write (`post`) delivers `body`/`requestBody` as the **pre-serialization object**, not the serialized string (R5).
   - The terminal event's `requestHeaders`/`requestBody` equal what `onRequest` captured for the same attempt (assert they are the stash, not re-read serialized `response.config`).
-  - A transport failure (network error, no response) fires `onError` with a `DattoApiError` and **no** `statusCode` (R8).
+  - Every event's `url` is the **absolute resolved** URL (`` `${apiUrl}${path}` ``), not the bare relative path (architect-r1-f2).
+  - A transport failure (network error, no response) fires `onError` whose `error` is the **raw thrown error handed off unchanged** (identity-equal, not a re-derived `DattoApiError`) and with **no** `statusCode` (R8); a non-2xx fires `onError` whose `error` is the raw `AxiosError` with `statusCode` present.
   - `durationMs` excludes throttle: inject a rate limiter whose `acquire` delays before dispatch and assert `durationMs` reflects only the (near-instant, nock) round-trip, not the injected delay (Decision 5).
   - An **`onError`-only** observer (no `onRequest`) still receives a terminal `onError` on a non-2xx with `requestHeaders`/`requestBody`/`durationMs` populated from the stash (Decision 5 capture-independent-of-callback).
   - A callback that throws, and one returning a rejected promise, leave the request outcome unchanged and log one `warn` (R7).
@@ -291,35 +384,39 @@ npm run build
 ## Phase 3: Instrument the OAuth grant/refresh path
 
 ### Goal
-Make `AuthManager.performRefresh` fire the observer for the token grant/refresh attempt: capture-and-stash at its own dispatch point (the grant client carries no interceptors), fire `onRequest` before the POST with `body` equal to the **serialized `application/x-www-form-urlencoded` string** as sent on the wire (R3/R5), fire `onResponse` on a 2xx **before** `tokenResponseSchema.safeParse` runs (so a malformed-token 2xx fires exactly one terminal event — `onResponse` — and never `onError`, Decision 4 rule 3), and fire `onError` in the existing `catch` for a non-2xx or transport failure with the mapped `DattoApiError` (R8). The grant's captured header map omits `Authorization` by design (the `Basic public-client:public` header is applied internally by axios); the API key rides in the captured body. Thread the raw observer from `DattoRmmClient` into `AuthManager`.
+Make `AuthManager.performRefresh` fire the observer for the token grant/refresh attempt: capture-and-stash at its own dispatch point (the grant client carries no interceptors), fire `onRequest` before the POST with `body` equal to the **serialized `application/x-www-form-urlencoded` string** as sent on the wire (R3/R5), fire `onResponse` on a 2xx **before** `tokenResponseSchema.safeParse` runs (so a malformed-token 2xx fires exactly one terminal event — `onResponse` — and never `onError`, Decision 4 rule 3), and fire `onError` in the existing `catch` for a non-2xx or transport failure handing off the **raw caught error** as `unknown` (R8 per the engineer-r1-f1 ruling — the observer no longer receives a mapped error). The method still constructs and **rethrows** its own `DattoApiError` to the caller exactly as today — only the observer stops receiving the mapped form. All existing logging (`logger?.debug`/`logger?.warn`) and the `issuedAt` token-TTL anchor are **preserved unchanged** (engineer-r1-f2 / Cluster 2). The grant's captured header map omits `Authorization` by design (the `Basic public-client:public` header is applied internally by axios); the API key rides in the captured body. Thread the raw observer from `DattoRmmClient` into `AuthManager`.
 
 **Requirements:** R3, R5, R6, R7, R8, R9
 
 ### Steps
 1. **Add `httpObserver` to `AuthManagerConfig`**: New optional field, threaded raw.
    - Files: `src/auth/auth-manager.ts`
-2. **Capture-and-stash + fire `onRequest` at the grant dispatch point**: In `performRefresh`, build the stash from the serialized body string, the grant path, method `POST`, headers `{ "Content-Type": "application/x-www-form-urlencoded" }` (the `Authorization: Basic` header is absent by design), and `startedAt = Date.now()` taken just before the POST; fire `onRequest`.
+   - Notes: Add a doc comment on the new `httpObserver` field explicitly noting it is delivered **raw/unmasked** — unlike the adjacent masked `logger` field beside it (engineer-r1-f8).
+2. **Capture-and-stash + fire `onRequest` at the grant dispatch point**: In `performRefresh`, build the capture through the **shared `captureRequest` assembler** (never inline — design Decision 2 / engineer-r1-f3) with method `"POST"`, the **absolute resolved** `url` `` `${this.config.apiUrl}${GRANT_PATH}` `` (architect-r1-f2), headers `{ "Content-Type": "application/x-www-form-urlencoded" }` (the `Authorization: Basic` header is absent by design), and `body` the serialized wire string; fire `onRequest`. Do this **without disturbing** the existing `issuedAt = Date.now()` (L141) and `logger?.debug("refreshing…")` (L142).
    - Files: `src/auth/auth-manager.ts`
-   - Notes: `body` is `body.toString()` — the exact wire string (already computed for the POST). Reuse the same `startedAt` for `durationMs`.
+   - Notes: `body` is `body.toString()` — the exact wire string (already computed for the POST). `captureRequest` stamps its own `startedAt` (the observer's dispatch timestamp) which `durationMs` uses; the pre-existing `issuedAt` remains the **token-TTL anchor** and is a distinct value that stays exactly as today (they may coincide but serve different purposes — do not collapse `issuedAt` into `startedAt`).
 3. **Fire `onResponse` on 2xx before `safeParse`**: Immediately after the `await this.grantClient.post(...)` resolves (a 2xx — axios rejects non-2xx into the `catch`), fire `onResponse` from the stash with `response.status`, `normalizeHeaders(response.headers)`, `response.data`, and `durationMs`. This is **before** the `tokenResponseSchema.safeParse` check, so a malformed-token 2xx cannot re-enter a terminal event.
    - Files: `src/auth/auth-manager.ts`
-4. **Fire `onError` in the existing `catch`**: For an axios error, `DattoApiError.fromAxiosError(err)`; for a non-axios error, the same `DattoApiError("Datto RMM authentication failed", { statusCode: 0, cause })` the method already builds. Fire `onError` from the stash with that error and (when `axios.isAxiosError(err) && err.response`) `statusCode`/`responseHeaders`/`responseBody`, then rethrow as today.
+4. **Fire `onError` in the existing `catch`**: Preserve the existing `catch` body verbatim — the `logger?.warn("Datto RMM OAuth2 token refresh failed")` (L156) and the existing mapping/rethrow (axios → `DattoApiError.fromAxiosError(err)`; non-axios → `new DattoApiError("Datto RMM authentication failed", { statusCode: 0, cause: err })`) all stay. **Add** a single `fireError(this.config.logger, this.config.httpObserver, capture, err)` call that hands off the **raw caught `err`** as `unknown` (never the mapped `DattoApiError`; engineer-r1-f1 ruling) — `fireError` itself adds `statusCode`/response fields when `err` is an `AxiosError` with a `response`. Do this **before** the rethrow so both still happen.
    - Files: `src/auth/auth-manager.ts`
-   - Notes: Do **not** fire `onError` on the malformed-token throw path (that follows a 2xx that already fired `onResponse`).
+   - Notes: Do **not** fire `onError` on the malformed-token throw path (that follows a 2xx that already fired `onResponse`). The malformed-response `logger?.warn` (L168) and its `DattoApiError` throw also stay unchanged. The observer receives the **raw** error; the caller still receives the constructed/rethrown `DattoApiError`.
 5. **Thread the raw observer through the client**: In `DattoRmmClient`, pass `validated.httpObserver` into the `AuthManager` config **unmasked**.
    - Files: `src/client/datto-rmm-client.ts`
 
 ### Opinionated Implementation Notes (Examples)
 ```typescript
-// performRefresh, around the existing grantClient.post:
+// performRefresh — observer fires AROUND the existing logic; every existing line is preserved.
+const issuedAt = Date.now();                                    // UNCHANGED — token-TTL anchor
+this.config.logger?.debug("refreshing Datto RMM OAuth2 token"); // UNCHANGED
+
 const wireBody = body.toString();
-const startedAt = Date.now();
-const capture: ObserverCapture = {
-  method: "POST", url: GRANT_PATH,
+const capture = captureRequest({                                // shared assembler (Decision 2)
+  method: "POST",
+  url: `${this.config.apiUrl}${GRANT_PATH}`,                     // absolute resolved URL (architect-r1-f2)
   headers: { "Content-Type": "application/x-www-form-urlencoded" }, // Basic auth absent by design
-  body: wireBody,            // serialized urlencoded string (R3/R5)
-  startedAt,
-};
+  body: wireBody,                                               // serialized urlencoded string (R3/R5)
+});
+// capture.startedAt is the observer's dispatch timestamp; issuedAt above stays the TTL anchor.
 fireRequest(this.config.logger, this.config.httpObserver, capture);
 
 let response;
@@ -328,24 +425,26 @@ try {
     auth: { username: BASIC_AUTH_USERNAME, password: BASIC_AUTH_PASSWORD },
   });
 } catch (err) {
-  const mapped = axios.isAxiosError(err)
-    ? DattoApiError.fromAxiosError(err as AxiosError<unknown>)
-    : new DattoApiError("Datto RMM authentication failed", { statusCode: 0, cause: err });
-  fireError(this.config.logger, this.config.httpObserver, capture, err, mapped);
-  throw mapped;
+  this.config.logger?.warn("Datto RMM OAuth2 token refresh failed"); // UNCHANGED
+  fireError(this.config.logger, this.config.httpObserver, capture, err); // raw err handed off (R8)
+  if (axios.isAxiosError(err)) {                                        // UNCHANGED mapping/rethrow
+    throw DattoApiError.fromAxiosError(err as AxiosError<unknown>);
+  }
+  throw new DattoApiError("Datto RMM authentication failed", { statusCode: 0, cause: err });
 }
 // 2xx: fire BEFORE safeParse so a malformed body never fires onError.
 fireResponse(this.config.logger, this.config.httpObserver, capture, response);
 
 const parsed = tokenResponseSchema.safeParse(response.data);
-// ...unchanged...
+// ...unchanged, including the malformed-response logger?.warn (L168) and its DattoApiError throw,
+//    and the info { accessToken, issuedAt, expiresAt } construction that reuses issuedAt...
 ```
 
 ### Tests (in this phase)
 - `tests/unit/auth/auth-manager.test.ts` (extend), using `nock`:
-  - A successful grant fires `onRequest` then `onResponse`; `body`/`requestBody` equal the raw `grant_type=password&username=...&password=...` urlencoded string (R3/R5); the captured header map omits `Authorization` and the body contains the API key.
+  - A successful grant fires `onRequest` then `onResponse`; `body`/`requestBody` equal the raw `grant_type=password&username=...&password=...` urlencoded string (R3/R5); the captured header map omits `Authorization` and the body contains the API key; the event `url` is the **absolute resolved** `` `${apiUrl}${GRANT_PATH}` `` (architect-r1-f2).
   - A grant POST returning **2xx with a malformed token body** fires exactly one terminal event — `onResponse` with the raw response body — and fires **no** `onError`, even though `performRefresh` throws a `DattoApiError` (Decision 4 rule 3).
-  - A grant returning a non-2xx fires `onError` with a `DattoApiError` carrying `statusCode`; a transport failure fires `onError` with `statusCode` absent (R8).
+  - A grant returning a non-2xx fires `onError` whose `error` is the **raw caught error handed off unchanged** (identity-equal, not the constructed `DattoApiError`) with `statusCode` present; a transport failure fires `onError` with `statusCode` absent (R8). In both cases `performRefresh` still **throws its own `DattoApiError`** to the caller (assert the thrown error is a `DattoApiError`, and — where feasible — that the existing `logger?.warn("…refresh failed")` still fires).
   - A throwing / rejecting callback leaves the grant outcome unchanged and logs one `warn` (R7).
 
 ### Documentation (if needed)
@@ -399,7 +498,7 @@ const client = createDattoRmmClient({ apiUrl: BASE_URL, apiKey, apiSecret, httpO
   - The token grant is observed (its own `onRequest`/`onResponse`) with the urlencoded-string body — R3, end-to-end.
   - A **lazy-refresh grant failure** (the Bearer `getToken()` throwing a `DattoApiError`) fires `onError` exactly **once** — on the grant attempt — and **never** a second `onError` on the shared instance (Decision 4 rule 2).
   - A `429 → retry → 200` on a resource read through the assembled client surfaces `onError(429)` then `onResponse(200)` — R2/R6.
-  - `onError.error` is a `DattoApiError` instance in every failing case (R8).
+  - `onError.error` is the **raw request error handed off unchanged** (typed `unknown`) in every failing case, while the SDK still throws its mapped `DattoApiError` to the caller (R8).
   - Omitting `httpObserver` entirely leaves request outcomes and event-free behavior unchanged (additive-only sanity).
 
 ### Documentation (if needed)

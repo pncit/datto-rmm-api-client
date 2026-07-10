@@ -1,0 +1,30 @@
+## reviser — round 2 (Phase 2 feedback disposition)
+
+Mode B, reviser round 2. Applied the triage-r3 plan as amended by the triage-r4 delta, in
+root-cause-first order, honoring every human ruling. triage opened **no `Challenge`** rows, so a
+disposition row is written for every Open finding across both reviewers. An internal self-review
+(schema in the prompt) was folded into the same revision — no separate finding list.
+
+Cross-stage note: the engineer-r1-f1 / architect-r1-f1 human ruling ("drop the `DattoApiError`
+guarantee; return `error` as `unknown`") plus the triage-r4 chain-watch ("land Cluster 1 **and** the
+cross-stage design/requirements edits … in one coherent pass so design.md, requirements, and
+`observer.ts`'s surface all state the same contract") directed the reviser to amend the upstream
+design/requirements. I therefore edited `design.md` (Overview, R8, `DattoHttpErrorEvent.error`,
+Decision 2 rationale, Decision 4 title/decision/rationale/alternatives, Success Criteria,
+Verification, Risks) alongside the plan, executing the human ruling rather than independently leading
+an `Escalate: Design Change:`. `architect-r1-f2`'s design amendment was already landed upstream
+(commit `17325eb`); I re-aligned the plan to it and added the plan-follow capture/test edits.
+
+| ID | Disposition | Rationale |
+|----|-------------|-----------|
+| engineer-r1-f1 | Fixed | Human ruling: drop the `DattoApiError` guarantee, type `onError.error` as `unknown`, hand off the raw request error. Amended design R8 + Decision 4 (title/decision/rationale/alternatives) + payload `error` field + Overview/Success/Verification/Risks to the `unknown` contract, and reshaped the plan: `DattoHttpErrorEvent.error: unknown`, dropped `mapObserverError` from `observer.ts` entirely, `fireError(logger, observer, capture, rawError: unknown)` passes the raw error straight through (no 5th `mappedError` param), Phase 2/3 fire sites hand off the raw `AxiosError`/`err`, and the Phase 1 test now asserts identity-equal pass-through. Per the triage-r4 delta the earlier "add `mapObserverError` + branch test" sub-items are mooted; the `fireError` response-field narrowing survives. |
+| architect-r1-f1 | Fixed | Reconciled duplicate of engineer-r1-f1 (same mechanism, DataModel severity). Resolved by the same `unknown` re-typing across design + plan; no separate change. |
+| engineer-r1-f3 | Fixed | Human ruling: add the shared capture-and-stash **assembler** to `observer.ts` and route both sites through it. Added `captureRequest({ method, url, headers, body })` owning method-uppercasing + `normalizeHeaders` + `startedAt`; Phase 2 interceptor and Phase 3 `performRefresh` now both build every capture through it (no inline capture), pinned in Step 5 prose and both examples. Did not reconcile the design to site-local capture (rejected option). |
+| engineer-r1-f4 | Fixed | Cluster 1 (revised): re-enumerated `observer.ts`'s complete export surface in Phase 1 S5 — `ObserverCapture`, `normalizeHeaders`, `captureRequest`, `invokeObserver`, `fireRequest`, `fireResponse`, `fireError` (no `mapObserverError`, mooted). Pinned `fireError`'s response-field narrowing rule (`axios.isAxiosError(rawError) && rawError.response`; non-axios → no response fields) and replaced the mooted mapping-branch test with a raw pass-through test. Both sites route through the enumerated primitives. |
+| architect-r1-f3 | Fixed | Reconciled duplicate of engineer-r1-f4 (missing export + missing branch test). Export surface completed; the `mapObserverError` branch test it asked for is mooted by the `unknown` ruling and replaced with the `fireError` pass-through test. |
+| engineer-r1-f2 | Fixed | Cluster 2: reworked the Phase 3 example + Steps 2/4 prose to **preserve** the existing `logger?.debug` (L142), `logger?.warn` (L156/L168), and the `issuedAt` (L141) token-TTL anchor, firing `onRequest`/`onResponse`/`onError` **around** them rather than replacing the catch. Stated `startedAt` (observer dispatch timestamp, on the capture) is distinct from `issuedAt` (TTL anchor); rethrow/mapping semantics unchanged. Per triage-r4, the grant's `fireError` now hands off the raw `err`; the auth-side `DattoApiError` is still constructed and rethrown. |
+| engineer-r1-f5 | Fixed | Human ruling: threaded a `callbackName` (`"onRequest"`/`"onResponse"`/`"onError"`) into `invokeObserver` and included it in the swallow `warn` message and `meta`; the fire helpers pass their own name. Added a Phase 1 test asserting the warn names the failing callback. `method`/`url` context left optional to the implementor. |
+| engineer-r1-f6 | Fixed | Human ruling: kept the global `axios-augment.d.ts` stash (design Decision 5 precedent). Fixed the plan muddle — Phase 2 now reads `error.config?.__dattoObserverCapture` directly off the globally-augmented config (no `RetryTrackedConfig` cast, which lacks the field) — and added the one-line note reconciling the `__datto` prefix (private per-attempt state, matching the retry keys) vs the unprefixed sibling `rateDescriptor`. |
+| engineer-r1-f7 | Fixed | Human ruling: stated the new `handleResponseError` parameter explicitly in Phase 2 Step 4 **prose** — `httpObserver?: DattoHttpObserver` as the 6th positional param inserted before `error`: `handleResponseError(instance, retryPolicy, onUnauthorized, logger, httpObserver, error)`. Noted the options-object refactor is optional and not mandated. |
+| engineer-r1-f8 | Fixed | Human ruling: instructed the implementor (Phase 2 S1, Phase 3 S1) to add a doc comment on the new `httpObserver` field of both `HttpClientConfig` and `AuthManagerConfig`, explicitly noting raw/unmasked delivery unlike the adjacent masked `logger`. |
+| architect-r1-f2 | Fixed | Design amended upstream (commit `17325eb`) to pin the absolute resolved URL; re-aligned the plan to it. Phase 2 captures `` `${requestConfig.baseURL ?? ""}${requestConfig.url ?? ""}` ``, Phase 3 captures `` `${this.config.apiUrl}${GRANT_PATH}` `` (both via `captureRequest`), and added absolute-`url` assertions to the Phase 2 and Phase 3 tests. |
