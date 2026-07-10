@@ -14,6 +14,8 @@ import type {
 } from "../rate-limit/rate-limiter";
 import { isRecord } from "../util/is-record";
 import { sleep } from "../util/sleep";
+import type { DattoHttpObserver } from "./http-observer";
+import { captureRequest, fireError, fireRequest, fireResponse } from "./observer";
 
 /**
  * Shared HTTP transport (Phase 5, R10–R12): builds the **single**, interceptor-bearing axios
@@ -80,6 +82,13 @@ export interface HttpClientConfig {
   readonly onUnauthorized?: () => void | Promise<void>;
   /** Optional logger for retry/throttle/rate-limit observability. No bodies/headers are logged. */
   readonly logger?: DattoLogger;
+  /**
+   * Optional HTTP-observer callbacks, fired once per physical attempt this instance dispatches
+   * (design Decision 2/5). Unlike {@link HttpClientConfig.logger}, which is always UDF-masked,
+   * this is threaded through **raw/unmasked** — the observer receives bodies and headers
+   * (including the `Authorization: Bearer` token) exactly as sent/received.
+   */
+  readonly httpObserver?: DattoHttpObserver;
 }
 
 function buildUserAgent(extra: string | undefined): string {
@@ -242,16 +251,30 @@ function build403Error(error: AxiosError): DattoApiError {
  * rejection to this response interceptor too. Rethrowing it unchanged here (rather than treating
  * it as an `AxiosError` and reconstructing a lossy `DattoApiError` from its `undefined`
  * `config`/`response` fields) preserves the original error's real `statusCode`/`response`/`cause`.
+ *
+ * Fires the HTTP-observer seam's terminal `onError` event (design Decision 4/5, plan Phase 2)
+ * immediately after the `!axios.isAxiosError` guard below — the single point that distinguishes a
+ * **dispatched** attempt (whose per-attempt stash was written by the observer's request
+ * interceptor) from a non-dispatched reject (a rate-limiter `acquire()` rejection, or the Bearer
+ * interceptor's `getToken()` throwing a `DattoApiError` on a lazy grant/refresh failure), both of
+ * which are non-axios rejects this guard rethrows before ever reaching that point.
  */
 async function handleResponseError(
   instance: AxiosInstance,
   retryPolicy: RetryPolicy,
   onUnauthorized: (() => void | Promise<void>) | undefined,
   logger: DattoLogger | undefined,
+  httpObserver: DattoHttpObserver | undefined,
   error: unknown,
 ): Promise<AxiosResponse> {
   if (!axios.isAxiosError(error)) {
     throw error;
+  }
+
+  const capture = error.config?.__dattoObserverCapture;
+  if (capture) {
+    // Raw AxiosError handed straight through to `onError.error` — no mapping (R8).
+    fireError(logger, httpObserver, capture, error);
   }
 
   const status = error.response?.status;
@@ -347,6 +370,29 @@ export function createHttpClient(config: HttpClientConfig): AxiosInstance {
     },
   });
 
+  // Registered FIRST so axios's LIFO request-interceptor ordering runs it LAST — after the
+  // rate-limit interceptor below and after `AuthManager.attachTo`'s Bearer interceptor, which is
+  // registered later on this same instance (design Decision 5). Only registered at all when an
+  // `httpObserver` is configured, for zero overhead otherwise.
+  if (config.httpObserver) {
+    const observer = config.httpObserver;
+    instance.interceptors.request.use((requestConfig) => {
+      // Every capture is built through the shared `captureRequest` assembler (design Decision 2)
+      // — this site never re-implements method-uppercasing or header normalization inline.
+      const capture = captureRequest({
+        method: requestConfig.method,
+        url: `${requestConfig.baseURL ?? ""}${requestConfig.url ?? ""}`,
+        headers: requestConfig.headers,
+        body: requestConfig.data,
+      });
+      // Unconditionally overwritten on every pass so a retried request never leaks a prior
+      // attempt's stash into this attempt's terminal event (R2).
+      requestConfig.__dattoObserverCapture = capture;
+      fireRequest(config.logger, observer, capture);
+      return requestConfig;
+    });
+  }
+
   instance.interceptors.request.use(async (requestConfig) => {
     const descriptor: RateDescriptor = requestConfig.rateDescriptor ?? {
       kind: "read",
@@ -356,13 +402,20 @@ export function createHttpClient(config: HttpClientConfig): AxiosInstance {
   });
 
   instance.interceptors.response.use(
-    (response) => response,
+    (response) => {
+      const capture = response.config.__dattoObserverCapture;
+      if (capture) {
+        fireResponse(config.logger, config.httpObserver, capture, response);
+      }
+      return response;
+    },
     (error: unknown) =>
       handleResponseError(
         instance,
         retryPolicy,
         config.onUnauthorized,
         config.logger,
+        config.httpObserver,
         error,
       ),
   );
