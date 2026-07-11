@@ -1,5 +1,0 @@
-## reviser — round 2 dispositions
-
-| ID | Disposition | Rationale |
-|----|-------------|-----------|
-| design-auditor-r2-f1 | Fixed | Genuine in-scope gap: the grant's post-2xx malformed-token `DattoApiError` (auth-manager.ts:166-178) is a `DattoApiError` in `AuthManager`, so it fell outside Decision 4's `BaseResource`/`DattoValidationError` carve-out and left the terminal event for that 2xx attempt unstated. Tightened (not padded) Decision 4 to state terminal selection is by the **HTTP status of the physical response**, not by whether the surrounding method later throws, and named the grant malformed-2xx `DattoApiError` as a second, structurally-identical instance of the existing post-2xx carve-out — a 2xx grant with a malformed body fires `onResponse` (raw body) and its subsequent `DattoApiError` is not `onError`. Reinforced Decision 5 consistency (fire `onResponse` off the resolved 2xx before `safeParse`), added the case to the Non-Goals non-firing set (one place), and added a Success Criterion + Verification test-matrix entry pinning exactly one terminal event (`onResponse`, no `onError`). No new section added, per the reviewer/triage. |
