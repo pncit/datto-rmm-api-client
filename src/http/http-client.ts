@@ -381,7 +381,11 @@ export function createHttpClient(config: HttpClientConfig): AxiosInstance {
       // — this site never re-implements method-uppercasing or header normalization inline.
       const capture = captureRequest({
         method: requestConfig.method,
-        url: `${requestConfig.baseURL ?? ""}${requestConfig.url ?? ""}`,
+        // `instance.getUri` runs axios's own `buildFullPath`/`combineURLs` and appends the
+        // serialized `params` query string, reproducing the URL exactly as dispatched — a naive
+        // `baseURL + url` concatenation would drop `params` (serialized only after request
+        // interceptors run) and mishandle absolute `url`s / slash joins.
+        url: instance.getUri(requestConfig),
         headers: requestConfig.headers,
         body: requestConfig.data,
       });

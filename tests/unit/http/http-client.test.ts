@@ -487,6 +487,34 @@ describe("createHttpClient", () => {
   });
 });
 
+/** Discriminated-union tuple for captured observer events — indexing narrows via the
+ * discriminant (`event[0]`), so recovering the concrete payload never needs an `as` cast. */
+type ObserverEvent =
+  | ["request", DattoHttpRequestEvent]
+  | ["response", DattoHttpResponseEvent]
+  | ["error", DattoHttpErrorEvent];
+
+function requestPayload(event: ObserverEvent | undefined): DattoHttpRequestEvent {
+  if (!event || event[0] !== "request") {
+    throw new Error(`expected a "request" event, got ${event?.[0] ?? "undefined"}`);
+  }
+  return event[1];
+}
+
+function responsePayload(event: ObserverEvent | undefined): DattoHttpResponseEvent {
+  if (!event || event[0] !== "response") {
+    throw new Error(`expected a "response" event, got ${event?.[0] ?? "undefined"}`);
+  }
+  return event[1];
+}
+
+function errorPayload(event: ObserverEvent | undefined): DattoHttpErrorEvent {
+  if (!event || event[0] !== "error") {
+    throw new Error(`expected an "error" event, got ${event?.[0] ?? "undefined"}`);
+  }
+  return event[1];
+}
+
 describe("createHttpClient — httpObserver", () => {
   beforeAll(() => {
     nock.disableNetConnect();
@@ -525,7 +553,7 @@ describe("createHttpClient — httpObserver", () => {
 
   it("fires onRequest then onResponse for a 2xx read, observing the Bearer header and a numeric durationMs", async () => {
     const scope = nock(BASE_URL).get("/foo").reply(200, { ok: true });
-    const events: Array<["request" | "response", unknown]> = [];
+    const events: ObserverEvent[] = [];
     const observer: DattoHttpObserver = {
       onRequest: (e) => events.push(["request", e]),
       onResponse: (e) => events.push(["response", e]),
@@ -537,9 +565,9 @@ describe("createHttpClient — httpObserver", () => {
 
     expect(response.data).toEqual({ ok: true });
     expect(events.map(([kind]) => kind)).toEqual(["request", "response"]);
-    const requestEvent = events[0]![1] as DattoHttpRequestEvent;
+    const requestEvent = requestPayload(events[0]);
     expect(requestEvent.headers.Authorization).toBe("Bearer test-token");
-    const responseEvent = events[1]![1] as DattoHttpResponseEvent;
+    const responseEvent = responsePayload(events[1]);
     expect(responseEvent.statusCode).toBe(200);
     expect(responseEvent.responseBody).toEqual({ ok: true });
     expect(typeof responseEvent.durationMs).toBe("number");
@@ -554,7 +582,7 @@ describe("createHttpClient — httpObserver", () => {
       .get("/foo")
       .reply(200, { ok: true });
 
-    const events: Array<["request" | "response" | "error", unknown]> = [];
+    const events: ObserverEvent[] = [];
     const observer: DattoHttpObserver = {
       onRequest: (e) => events.push(["request", e]),
       onResponse: (e) => events.push(["response", e]),
@@ -572,12 +600,47 @@ describe("createHttpClient — httpObserver", () => {
       "request",
       "response",
     ]);
-    const errorEvent = events[1]![1] as DattoHttpErrorEvent;
+    const errorEvent = errorPayload(events[1]);
     expect(errorEvent.statusCode).toBe(429);
-    const responseEvent = events[3]![1] as DattoHttpResponseEvent;
+    const responseEvent = responsePayload(events[3]);
     expect(responseEvent.statusCode).toBe(200);
     expect(scope.isDone()).toBe(true);
   }, 10_000);
+
+  it("fires onRequest, onError(401), onRequest, onResponse(200) for a transparently-retried 401 with an onUnauthorized hook", async () => {
+    const scope = nock(BASE_URL)
+      .get("/foo")
+      .reply(401, { message: "unauthorized" })
+      .get("/foo")
+      .reply(200, { ok: true });
+
+    const events: ObserverEvent[] = [];
+    const observer: DattoHttpObserver = {
+      onRequest: (e) => events.push(["request", e]),
+      onResponse: (e) => events.push(["response", e]),
+      onError: (e) => events.push(["error", e]),
+    };
+    const onUnauthorized = vi.fn().mockResolvedValue(undefined);
+
+    const response = await observerClient(observer, { onUnauthorized }).get(
+      "/foo",
+      { rateDescriptor: { kind: "read" } },
+    );
+
+    expect(response.data).toEqual({ ok: true });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(events.map(([kind]) => kind)).toEqual([
+      "request",
+      "error",
+      "request",
+      "response",
+    ]);
+    const errorEvent = errorPayload(events[1]);
+    expect(errorEvent.statusCode).toBe(401);
+    const responseEvent = responsePayload(events[3]);
+    expect(responseEvent.statusCode).toBe(200);
+    expect(scope.isDone()).toBe(true);
+  });
 
   it("delivers a JSON write's body/requestBody as the pre-serialization object, not the serialized string", async () => {
     const scope = nock(BASE_URL)
@@ -621,6 +684,52 @@ describe("createHttpClient — httpObserver", () => {
     });
 
     expect(urls).toEqual([`${BASE_URL}/foo/bar`, `${BASE_URL}/foo/bar`]);
+    expect(scope.isDone()).toBe(true);
+  });
+
+  it("includes the serialized params query string in the observed url, matching what axios dispatches (instance.getUri)", async () => {
+    const scope = nock(BASE_URL)
+      .get("/devices")
+      .query({ siteId: "42", filter: "online" })
+      .reply(200, { ok: true });
+    const requestEvents: DattoHttpRequestEvent[] = [];
+    const observer: DattoHttpObserver = {
+      onRequest: (e) => requestEvents.push(e),
+    };
+
+    await observerClient(observer).get("/devices", {
+      params: { siteId: "42", filter: "online" },
+      rateDescriptor: { kind: "read" },
+    });
+
+    expect(requestEvents).toHaveLength(1);
+    expect(requestEvents[0]!.url).toBe(
+      `${BASE_URL}/devices?siteId=42&filter=online`,
+    );
+    expect(scope.isDone()).toBe(true);
+  });
+
+  it("observes a paginate-style first page's params-carried query string in url, mirroring BaseResource.paginate's first request", async () => {
+    // Mirrors `BaseResource.paginate`'s first-page dispatch — `this.axios.get(startPath, { params:
+    // pageParams, rateDescriptor })` — which is the one page whose cursor/filter state travels via
+    // `params:` rather than being pre-inlined into the URL (subsequent pages inline
+    // `pathname + search` from the server's `nextPageUrl` into `url` directly).
+    const scope = nock(BASE_URL)
+      .get("/audit-log")
+      .query({ pageSize: "100" })
+      .reply(200, { pageDetails: { nextPageUrl: null }, entries: [] });
+    const requestEvents: DattoHttpRequestEvent[] = [];
+    const observer: DattoHttpObserver = {
+      onRequest: (e) => requestEvents.push(e),
+    };
+
+    await observerClient(observer).get("/audit-log", {
+      params: { pageSize: 100 },
+      rateDescriptor: { kind: "read" },
+    });
+
+    expect(requestEvents).toHaveLength(1);
+    expect(requestEvents[0]!.url).toBe(`${BASE_URL}/audit-log?pageSize=100`);
     expect(scope.isDone()).toBe(true);
   });
 
