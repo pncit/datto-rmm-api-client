@@ -310,6 +310,13 @@ function responsePayload(event: ObserverEvent | undefined): DattoHttpResponseEve
   return event[1];
 }
 
+function errorPayload(event: ObserverEvent | undefined): DattoHttpErrorEvent {
+  if (!event || event[0] !== "error") {
+    throw new Error(`expected an "error" event, got ${event?.[0] ?? "undefined"}`);
+  }
+  return event[1];
+}
+
 describe("AuthManager — httpObserver", () => {
   beforeAll(() => {
     nock.disableNetConnect();
@@ -344,8 +351,10 @@ describe("AuthManager — httpObserver", () => {
     expect(requestEvent.method).toBe("POST");
     expect(requestEvent.url).toBe(`${BASE_URL}${GRANT_PATH}`);
     expect(requestEvent.headers.Authorization).toBeUndefined();
-    expect(typeof requestEvent.body).toBe("string");
-    const params = new URLSearchParams(requestEvent.body as string);
+    if (typeof requestEvent.body !== "string") {
+      throw new Error("expected a string body");
+    }
+    const params = new URLSearchParams(requestEvent.body);
     expect(params.get("grant_type")).toBe("password");
     expect(params.get("username")).toBe("my-key");
     expect(params.get("password")).toBe("my-secret");
@@ -358,6 +367,52 @@ describe("AuthManager — httpObserver", () => {
     });
     expect(responseEvent.requestBody).toBe(requestEvent.body);
     expect(typeof responseEvent.durationMs).toBe("number");
+    expect(scope.isDone()).toBe(true);
+  });
+
+  it("composes the observed url via the grant client's own resolver so a trailing-slash apiUrl does not double the slash", async () => {
+    const trailingSlashBase = `${BASE_URL}/`;
+    nock(BASE_URL)
+      .post(GRANT_PATH)
+      .reply(200, { access_token: "tok-1", expires_in: 3600 });
+    const events: ObserverEvent[] = [];
+    const observer: DattoHttpObserver = {
+      onRequest: (e) => events.push(["request", e]),
+    };
+
+    const manager = new AuthManager(
+      config({ apiUrl: trailingSlashBase, httpObserver: observer }),
+    );
+    await manager.getToken();
+
+    const requestEvent = requestPayload(events[0]);
+    expect(requestEvent.url).toBe(`${BASE_URL}${GRANT_PATH}`);
+    expect(requestEvent.url).not.toContain("//auth");
+  });
+
+  it("fires onRequest/onResponse exactly once for a burst of concurrent getToken calls sharing one grant round-trip", async () => {
+    const scope = nock(BASE_URL)
+      .post(GRANT_PATH)
+      .once()
+      .reply(200, { access_token: "tok-1", expires_in: 3600 });
+    const events: ObserverEvent[] = [];
+    const observer: DattoHttpObserver = {
+      onRequest: (e) => events.push(["request", e]),
+      onResponse: (e) => events.push(["response", e]),
+      onError: (e) => events.push(["error", e]),
+    };
+
+    const manager = new AuthManager(config({ httpObserver: observer }));
+    const [first, second, third] = await Promise.all([
+      manager.getToken(),
+      manager.getToken(),
+      manager.getToken(),
+    ]);
+
+    expect(first.accessToken).toBe("tok-1");
+    expect(second.accessToken).toBe("tok-1");
+    expect(third.accessToken).toBe("tok-1");
+    expect(events.map(([kind]) => kind)).toEqual(["request", "response"]);
     expect(scope.isDone()).toBe(true);
   });
 
@@ -382,12 +437,16 @@ describe("AuthManager — httpObserver", () => {
     expect(responseEvent.responseBody).toEqual({ expires_in: 3600 });
   });
 
-  it("fires onError with the raw caught error (identity-equal, not the constructed DattoApiError) and statusCode present for a non-2xx grant, while still throwing a DattoApiError", async () => {
+  it("fires onError with the raw caught error (identity-equal, not the constructed DattoApiError) and statusCode present for a non-2xx grant, and does not also fire onResponse, while still throwing a DattoApiError", async () => {
     nock(BASE_URL)
       .post(GRANT_PATH)
       .reply(401, { message: "invalid credentials" });
-    const errorEvents: DattoHttpErrorEvent[] = [];
-    const observer: DattoHttpObserver = { onError: (e) => errorEvents.push(e) };
+    const events: ObserverEvent[] = [];
+    const observer: DattoHttpObserver = {
+      onRequest: (e) => events.push(["request", e]),
+      onResponse: (e) => events.push(["response", e]),
+      onError: (e) => events.push(["error", e]),
+    };
     const logger = {
       debug: vi.fn(),
       info: vi.fn(),
@@ -401,28 +460,34 @@ describe("AuthManager — httpObserver", () => {
     const error = await manager.getToken().catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(DattoApiError);
-    expect(errorEvents).toHaveLength(1);
-    expect(errorEvents[0]!.statusCode).toBe(401);
-    expect(errorEvents[0]!.error).not.toBeInstanceOf(DattoApiError);
-    expect(axios.isAxiosError(errorEvents[0]!.error)).toBe(true);
-    expect(errorEvents[0]!.error).not.toBe(error);
+    expect(events.map(([kind]) => kind)).toEqual(["request", "error"]);
+    const errorEvent = errorPayload(events[1]);
+    expect(errorEvent.statusCode).toBe(401);
+    expect(errorEvent.error).not.toBeInstanceOf(DattoApiError);
+    expect(axios.isAxiosError(errorEvent.error)).toBe(true);
+    expect(errorEvent.error).not.toBe(error);
     expect(logger.warn).toHaveBeenCalledWith(
       "Datto RMM OAuth2 token refresh failed",
     );
   });
 
-  it("fires onError with no statusCode for a transport-level grant failure, while still throwing a DattoApiError", async () => {
+  it("fires onError with no statusCode for a transport-level grant failure, and does not also fire onResponse, while still throwing a DattoApiError", async () => {
     nock(BASE_URL).post(GRANT_PATH).replyWithError("network down");
-    const errorEvents: DattoHttpErrorEvent[] = [];
-    const observer: DattoHttpObserver = { onError: (e) => errorEvents.push(e) };
+    const events: ObserverEvent[] = [];
+    const observer: DattoHttpObserver = {
+      onRequest: (e) => events.push(["request", e]),
+      onResponse: (e) => events.push(["response", e]),
+      onError: (e) => events.push(["error", e]),
+    };
 
     const manager = new AuthManager(config({ httpObserver: observer }));
     const error = await manager.getToken().catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(DattoApiError);
-    expect(errorEvents).toHaveLength(1);
-    expect(errorEvents[0]!.statusCode).toBeUndefined();
-    expect(errorEvents[0]!.error).not.toBeInstanceOf(DattoApiError);
+    expect(events.map(([kind]) => kind)).toEqual(["request", "error"]);
+    const errorEvent = errorPayload(events[1]);
+    expect(errorEvent.statusCode).toBeUndefined();
+    expect(errorEvent.error).not.toBeInstanceOf(DattoApiError);
   });
 
   it("swallows a throwing onRequest and a rejecting onResponse without altering the grant outcome, logging one warn each", async () => {

@@ -41,6 +41,7 @@ export interface AuthManagerConfig {
 }
 
 const GRANT_PATH = "/auth/oauth/token";
+const GRANT_CONTENT_TYPE = "application/x-www-form-urlencoded";
 
 /**
  * Datto RMM's public OAuth2 password-grant client credentials — a fixed, non-secret
@@ -79,7 +80,7 @@ export class AuthManager {
     this.grantClient = axios.create({
       baseURL: config.apiUrl,
       timeout: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { "Content-Type": GRANT_CONTENT_TYPE },
     });
   }
 
@@ -159,8 +160,8 @@ export class AuthManager {
     // timestamp — distinct from `issuedAt` above, which remains the token-TTL anchor.
     const capture = captureRequest({
       method: "POST",
-      url: `${this.config.apiUrl}${GRANT_PATH}`,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      url: this.grantClient.getUri({ url: GRANT_PATH }),
+      headers: { "Content-Type": GRANT_CONTENT_TYPE },
       body: wireBody,
     });
     fireRequest(this.config.logger, this.config.httpObserver, capture);
