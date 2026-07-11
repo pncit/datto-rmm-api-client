@@ -12,6 +12,12 @@ import {
 
 import { AuthManager, type AuthManagerConfig } from "@/auth/auth-manager";
 import { DattoApiError } from "@/errors";
+import type {
+  DattoHttpErrorEvent,
+  DattoHttpObserver,
+  DattoHttpRequestEvent,
+  DattoHttpResponseEvent,
+} from "@/http/http-observer";
 
 const BASE_URL = "https://zinfandel-api.example.com";
 const GRANT_PATH = "/auth/oauth/token";
@@ -279,5 +285,169 @@ describe("AuthManager.attachTo", () => {
 
     expect(error).toBeInstanceOf(DattoApiError);
     expect(grantScope.isDone()).toBe(true);
+  });
+});
+
+/** Discriminated-union tuple for captured observer events, mirroring `http-client.test.ts`'s
+ * helper — indexing narrows via the discriminant (`event[0]`), so recovering the concrete
+ * payload never needs an `as` cast. */
+type ObserverEvent =
+  | ["request", DattoHttpRequestEvent]
+  | ["response", DattoHttpResponseEvent]
+  | ["error", DattoHttpErrorEvent];
+
+function requestPayload(event: ObserverEvent | undefined): DattoHttpRequestEvent {
+  if (!event || event[0] !== "request") {
+    throw new Error(`expected a "request" event, got ${event?.[0] ?? "undefined"}`);
+  }
+  return event[1];
+}
+
+function responsePayload(event: ObserverEvent | undefined): DattoHttpResponseEvent {
+  if (!event || event[0] !== "response") {
+    throw new Error(`expected a "response" event, got ${event?.[0] ?? "undefined"}`);
+  }
+  return event[1];
+}
+
+describe("AuthManager — httpObserver", () => {
+  beforeAll(() => {
+    nock.disableNetConnect();
+  });
+
+  afterAll(() => {
+    nock.enableNetConnect();
+  });
+
+  afterEach(() => {
+    nock.cleanAll();
+  });
+
+  it("fires onRequest then onResponse for a successful grant, with the raw urlencoded body and no Authorization in the captured headers", async () => {
+    const scope = nock(BASE_URL)
+      .post(GRANT_PATH)
+      .reply(200, { access_token: "tok-1", expires_in: 3600 });
+    const events: ObserverEvent[] = [];
+    const observer: DattoHttpObserver = {
+      onRequest: (e) => events.push(["request", e]),
+      onResponse: (e) => events.push(["response", e]),
+      onError: (e) => events.push(["error", e]),
+    };
+
+    const manager = new AuthManager(
+      config({ apiKey: "my-key", apiSecret: "my-secret", httpObserver: observer }),
+    );
+    await manager.getToken();
+
+    expect(events.map(([kind]) => kind)).toEqual(["request", "response"]);
+    const requestEvent = requestPayload(events[0]);
+    expect(requestEvent.method).toBe("POST");
+    expect(requestEvent.url).toBe(`${BASE_URL}${GRANT_PATH}`);
+    expect(requestEvent.headers.Authorization).toBeUndefined();
+    expect(typeof requestEvent.body).toBe("string");
+    const params = new URLSearchParams(requestEvent.body as string);
+    expect(params.get("grant_type")).toBe("password");
+    expect(params.get("username")).toBe("my-key");
+    expect(params.get("password")).toBe("my-secret");
+
+    const responseEvent = responsePayload(events[1]);
+    expect(responseEvent.statusCode).toBe(200);
+    expect(responseEvent.responseBody).toEqual({
+      access_token: "tok-1",
+      expires_in: 3600,
+    });
+    expect(responseEvent.requestBody).toBe(requestEvent.body);
+    expect(typeof responseEvent.durationMs).toBe("number");
+    expect(scope.isDone()).toBe(true);
+  });
+
+  it("fires exactly one terminal event (onResponse, with the raw response body) and no onError for a 2xx malformed-token grant", async () => {
+    nock(BASE_URL)
+      .post(GRANT_PATH)
+      .reply(200, { expires_in: 3600 });
+    const events: ObserverEvent[] = [];
+    const observer: DattoHttpObserver = {
+      onRequest: (e) => events.push(["request", e]),
+      onResponse: (e) => events.push(["response", e]),
+      onError: (e) => events.push(["error", e]),
+    };
+
+    const manager = new AuthManager(config({ httpObserver: observer }));
+    const error = await manager.getToken().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DattoApiError);
+    expect(events.map(([kind]) => kind)).toEqual(["request", "response"]);
+    const responseEvent = responsePayload(events[1]);
+    expect(responseEvent.statusCode).toBe(200);
+    expect(responseEvent.responseBody).toEqual({ expires_in: 3600 });
+  });
+
+  it("fires onError with the raw caught error (identity-equal, not the constructed DattoApiError) and statusCode present for a non-2xx grant, while still throwing a DattoApiError", async () => {
+    nock(BASE_URL)
+      .post(GRANT_PATH)
+      .reply(401, { message: "invalid credentials" });
+    const errorEvents: DattoHttpErrorEvent[] = [];
+    const observer: DattoHttpObserver = { onError: (e) => errorEvents.push(e) };
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const manager = new AuthManager(
+      config({ httpObserver: observer, logger }),
+    );
+    const error = await manager.getToken().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DattoApiError);
+    expect(errorEvents).toHaveLength(1);
+    expect(errorEvents[0]!.statusCode).toBe(401);
+    expect(errorEvents[0]!.error).not.toBeInstanceOf(DattoApiError);
+    expect(axios.isAxiosError(errorEvents[0]!.error)).toBe(true);
+    expect(errorEvents[0]!.error).not.toBe(error);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Datto RMM OAuth2 token refresh failed",
+    );
+  });
+
+  it("fires onError with no statusCode for a transport-level grant failure, while still throwing a DattoApiError", async () => {
+    nock(BASE_URL).post(GRANT_PATH).replyWithError("network down");
+    const errorEvents: DattoHttpErrorEvent[] = [];
+    const observer: DattoHttpObserver = { onError: (e) => errorEvents.push(e) };
+
+    const manager = new AuthManager(config({ httpObserver: observer }));
+    const error = await manager.getToken().catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(DattoApiError);
+    expect(errorEvents).toHaveLength(1);
+    expect(errorEvents[0]!.statusCode).toBeUndefined();
+    expect(errorEvents[0]!.error).not.toBeInstanceOf(DattoApiError);
+  });
+
+  it("swallows a throwing onRequest and a rejecting onResponse without altering the grant outcome, logging one warn each", async () => {
+    nock(BASE_URL)
+      .post(GRANT_PATH)
+      .reply(200, { access_token: "tok-1", expires_in: 3600 });
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const observer: DattoHttpObserver = {
+      onRequest: () => {
+        throw new Error("boom");
+      },
+      onResponse: () => Promise.reject(new Error("nope")),
+    };
+
+    const manager = new AuthManager(config({ httpObserver: observer, logger }));
+    const token = await manager.getToken();
+    // Flush the microtask queue so the rejected onResponse's swallow-warn has run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(token.accessToken).toBe("tok-1");
+    expect(logger.warn).toHaveBeenCalledTimes(2);
   });
 });

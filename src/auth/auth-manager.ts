@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { DEFAULT_TIMEOUT_MS, DEFAULT_TOKEN_REFRESH_PCT } from "../defaults";
 import { DattoApiError } from "../errors";
+import type { DattoHttpObserver } from "../http/http-observer";
+import { captureRequest, fireError, fireRequest, fireResponse } from "../http/observer";
 import type { DattoLogger } from "../logging/logger";
 
 import { InMemoryTokenStore, type TokenInfo } from "./token-store";
@@ -29,6 +31,13 @@ export interface AuthManagerConfig {
   readonly timeoutMs?: number;
   /** Optional logger for refresh observability. Never logs the request body or credentials. */
   readonly logger?: DattoLogger;
+  /**
+   * Optional HTTP-observer callbacks, fired once for the grant/refresh round-trip this class
+   * dispatches (design Decision 2/5). Unlike {@link AuthManagerConfig.logger}, which is always
+   * UDF-masked, this is threaded through **raw/unmasked** — the observer receives the serialized
+   * grant body (carrying the API key) and response exactly as sent/received.
+   */
+  readonly httpObserver?: DattoHttpObserver;
 }
 
 const GRANT_PATH = "/auth/oauth/token";
@@ -137,23 +146,38 @@ export class AuthManager {
       username: this.config.apiKey,
       password: this.config.apiSecret,
     });
+    const wireBody = body.toString();
 
     const issuedAt = Date.now();
     this.config.logger?.debug("refreshing Datto RMM OAuth2 token");
+
+    // Built through the shared `captureRequest` assembler (design Decision 2) — never inline —
+    // so this site cannot drift from the shared instance's interceptor in how it uppercases the
+    // method or normalizes headers. `Authorization` is omitted by design: the `Basic` header
+    // below is applied internally by axios from the per-request `auth:` option (Decision 5); the
+    // API key rides in `wireBody` instead. `capture.startedAt` is the observer's own dispatch
+    // timestamp — distinct from `issuedAt` above, which remains the token-TTL anchor.
+    const capture = captureRequest({
+      method: "POST",
+      url: `${this.config.apiUrl}${GRANT_PATH}`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: wireBody,
+    });
+    fireRequest(this.config.logger, this.config.httpObserver, capture);
+
     let response;
     try {
-      response = await this.grantClient.post<unknown>(
-        GRANT_PATH,
-        body.toString(),
-        {
-          auth: {
-            username: BASIC_AUTH_USERNAME,
-            password: BASIC_AUTH_PASSWORD,
-          },
+      response = await this.grantClient.post<unknown>(GRANT_PATH, wireBody, {
+        auth: {
+          username: BASIC_AUTH_USERNAME,
+          password: BASIC_AUTH_PASSWORD,
         },
-      );
+      });
     } catch (err) {
       this.config.logger?.warn("Datto RMM OAuth2 token refresh failed");
+      // The raw caught error is handed straight through to `onError.error` — never the mapped
+      // `DattoApiError` constructed below (design Decision 4 / R8).
+      fireError(this.config.logger, this.config.httpObserver, capture, err);
       if (axios.isAxiosError(err)) {
         throw DattoApiError.fromAxiosError(err as AxiosError<unknown>);
       }
@@ -162,6 +186,11 @@ export class AuthManager {
         cause: err,
       });
     }
+
+    // Fired on the resolved 2xx, BEFORE `safeParse` runs below — a malformed-token 2xx has
+    // already fired its one terminal event here and must never also fire `onError` (Decision 4
+    // rule 3).
+    fireResponse(this.config.logger, this.config.httpObserver, capture, response);
 
     const parsed = tokenResponseSchema.safeParse(response.data);
     if (!parsed.success) {

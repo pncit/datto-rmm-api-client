@@ -73,6 +73,9 @@ export class DattoRmmClient {
       apiSecret: validated.apiSecret,
       tokenRefreshPct: validated.tokenRefreshPct,
       logger,
+      // Threaded raw/unmasked — unlike `logger`, the observer's whole purpose is un-redacted
+      // delivery (design Decision 6 / R9); it must never pass through `withUdfMasking`.
+      httpObserver: validated.httpObserver,
     });
 
     const axiosInstance = createHttpClient({
