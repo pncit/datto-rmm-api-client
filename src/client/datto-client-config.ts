@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { DEFAULT_RETRY, DEFAULT_TOKEN_REFRESH_PCT } from "../defaults";
+import { dattoHttpObserverSchema } from "../http/http-observer";
 import { dattoLoggerSchema } from "../logging/logger";
 
 /**
@@ -76,6 +77,11 @@ export const dattoRmmClientConfigSchema = z.strictObject({
     .optional()
     .describe(
       "Optional overrides for the committed rate-limit table. Unset fields fall back to the table's exported constants.",
+    ),
+  httpObserver: dattoHttpObserverSchema
+    .optional()
+    .describe(
+      "Optional HTTP-observer callbacks (onRequest/onResponse/onError), fired once per physical HTTP attempt. Unlike `logger`, delivery is raw and unmasked — bearer tokens and the API key are not redacted; the consumer must redact.",
     ),
 });
 

@@ -35,6 +35,9 @@ with its sibling PNCIT package, `fuze-api`.
   retries that honor `429 Retry-After`.
 - **Pluggable, UDF-masking logger** — bring your own logger (`debug`/`info`/`warn`/`error`); every
   log call is routed through a masking decorator that redacts UDF values before they ever reach it.
+- **Optional HTTP observer** — an `httpObserver` seam lets a compliance/audit pipeline watch every
+  raw HTTP exchange (request, response/error, duration) without ever touching axios. See [Observing
+  HTTP exchanges](#observing-http-exchanges-httpobserver).
 - **Fully typed** — every namespace, request body, and response entity is exported for reuse in
   your own code and tests.
 
@@ -374,6 +377,62 @@ also only walks a log call's `meta` object, never the message string, so the gua
 as long as call sites never interpolate a wire value into message text (this client's own code
 follows that rule everywhere).
 
+## Observing HTTP exchanges (`httpObserver`)
+
+```ts
+import type { DattoHttpObserver } from "datto-rmm-api-client";
+
+const httpObserver: DattoHttpObserver = {
+  onRequest: (e) => audit.record("request", e),
+  onResponse: (e) => audit.record("response", e),
+  onError: (e) => audit.record("error", e),
+};
+
+const client = createDattoRmmClient({ apiUrl, apiKey, apiSecret, httpObserver });
+```
+
+`httpObserver` is an optional, purely-observational seam for a consumer with a compliance/audit
+obligation to record every outbound HTTP exchange this client makes — the capability `0.1.x`'s
+inject-your-own-axios-instance approach provided, restored here without handing back the axios
+instance or any way to alter the request. The client keeps full ownership of authentication, rate
+limiting, retry, and pagination; `httpObserver` only watches. Omitting it changes nothing.
+
+**⚠️ Raw, un-redacted delivery.** Unlike `logger` (masked, body/header-free), every callback here
+receives the exchange exactly as sent/received — **including the `Authorization: Bearer` token on
+every resource request and the API key and API secret in the OAuth token grant's request body.**
+This client redacts nothing before invoking `httpObserver`; if your audit pipeline must not retain
+those values, your callback is responsible for redacting them before recording the event.
+
+- **`onRequest(event: DattoHttpRequestEvent)`** — fires immediately before an attempt is
+  dispatched (after rate-limit throttling and after the `Authorization` header is attached), with
+  `method`, the absolute resolved `url` (including any query string), `headers`, and `body`.
+- **`onResponse(event: DattoHttpResponseEvent)`** — fires when that attempt receives a 2xx. Carries
+  the same `method`/`url` as the `onRequest` event for this attempt, plus the request-side fields
+  **renamed** `requestHeaders`/`requestBody` (not `headers`/`body`), plus `statusCode`,
+  `responseHeaders`, `responseBody`, and `durationMs` (wire time only — throttle wait is excluded).
+- **`onError(event: DattoHttpErrorEvent)`** — fires when that attempt receives any non-2xx or no
+  response at all. Like `onResponse`, it carries `method`/`url` and the renamed
+  `requestHeaders`/`requestBody`, plus `durationMs`. `error` is the **raw request error, typed
+  `unknown`** — exactly what the transport produced, never re-derived or mapped to `DattoApiError`
+  — because a `throw` guarantees nothing about its own shape. `statusCode`/`responseHeaders`/
+  `responseBody` are present only when a response was actually received (absent for a
+  network/timeout failure).
+
+**Per-attempt, not per logical call.** Each callback fires once per **physical** HTTP attempt, so a
+retried exchange is never collapsed into one event: a `429 → retry → 200` sequence fires
+`onError` (statusCode 429) and then `onResponse` (statusCode 200) — two fully observed attempts.
+The two internal exchanges `0.1.x` consumers relied on are both covered: the OAuth token
+grant/refresh round-trip (`body`/`requestBody` is the raw `application/x-www-form-urlencoded`
+wire string, carrying the API key) and every individual pagination page (an N-page paginated read
+fires N request + N terminal events, one pair per page).
+
+A callback that throws, or returns a rejected promise, can never alter, delay, or fail the real
+request — the failure is caught, swallowed, and logged once at `warn` on your `logger` (if any).
+
+`DattoHttpObserver` and its three named event types share one header alias, `DattoHttpHeaders`
+(`Record<string, string | string[] | undefined>`) — five exported types in total, none of which
+reference axios.
+
 ## Validation
 
 Request and response schemas are generated from Datto's committed OpenAPI specification
@@ -458,6 +517,9 @@ In addition to `DattoRmmClient`, `createDattoRmmClient`, and the error classes d
 package exports:
 
 - `DattoRmmClientConfig`, `DattoLogger` — the config and logger shapes.
+- `DattoHttpObserver`, `DattoHttpRequestEvent`, `DattoHttpResponseEvent`, `DattoHttpErrorEvent`,
+  `DattoHttpHeaders` — the `httpObserver` seam's types (see [Observing HTTP
+  exchanges](#observing-http-exchanges-httpobserver)).
 - `Device`, `Alert` — the reconciled entity types (UDF record, open `alertContext`, widened
   open-enum fields) that `client.devices`/`client.alerts` methods actually return.
 - `DeviceUdfInput`, `DeviceWarrantyInput`, `SiteVariableCreateInput`, `SiteVariableUpdateInput`,
@@ -499,7 +561,9 @@ from a `0.1.x` release, every one of the following changed:
    [Validation](#validation)); this replaces all three old modes with one consistent model.
 4. **Config fields changed.** `autoRefresh` is removed (it was declared but never used in `0.1.x`).
    `userAgentExtra` and `tokenRefreshPct` were also declared-but-unused in `0.1.x`; they are now
-   fully functional. There is no `axiosInstance` config option.
+   fully functional. There is no `axiosInstance` config option — if you injected your own axios
+   instance for observability/audit purposes, see [Observing HTTP
+   exchanges](#observing-http-exchanges-httpobserver) for the supported `httpObserver` replacement.
 5. **The logger interface changed.** `0.1.x` accepted any variadic `LoggerLike` (`(...args: any[])
 => void`, i.e. `console`-shaped) directly. `1.0.0` requires the stricter `DattoLogger`
    (`debug/info/warn/error`, each `(message: string, meta?: Record<string, unknown>) => void`,
