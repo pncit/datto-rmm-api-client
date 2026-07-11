@@ -399,21 +399,24 @@ limiting, retry, and pagination; `httpObserver` only watches. Omitting it change
 
 **⚠️ Raw, un-redacted delivery.** Unlike `logger` (masked, body/header-free), every callback here
 receives the exchange exactly as sent/received — **including the `Authorization: Bearer` token on
-every resource request and the API key in the OAuth token grant's request body.** This client
-redacts nothing before invoking `httpObserver`; if your audit pipeline must not retain those
-values, your callback is responsible for redacting them before recording the event.
+every resource request and the API key and API secret in the OAuth token grant's request body.**
+This client redacts nothing before invoking `httpObserver`; if your audit pipeline must not retain
+those values, your callback is responsible for redacting them before recording the event.
 
 - **`onRequest(event: DattoHttpRequestEvent)`** — fires immediately before an attempt is
   dispatched (after rate-limit throttling and after the `Authorization` header is attached), with
   `method`, the absolute resolved `url` (including any query string), `headers`, and `body`.
-- **`onResponse(event: DattoHttpResponseEvent)`** — fires when that attempt receives a 2xx, adding
-  `statusCode`, `responseHeaders`, `responseBody`, and `durationMs` (wire time only — throttle wait
-  is excluded).
+- **`onResponse(event: DattoHttpResponseEvent)`** — fires when that attempt receives a 2xx. Carries
+  the same `method`/`url` as the `onRequest` event for this attempt, plus the request-side fields
+  **renamed** `requestHeaders`/`requestBody` (not `headers`/`body`), plus `statusCode`,
+  `responseHeaders`, `responseBody`, and `durationMs` (wire time only — throttle wait is excluded).
 - **`onError(event: DattoHttpErrorEvent)`** — fires when that attempt receives any non-2xx or no
-  response at all. `error` is the **raw request error, typed `unknown`** — exactly what the
-  transport produced, never re-derived or mapped to `DattoApiError` — because a `throw` guarantees
-  nothing about its own shape. `statusCode`/`responseHeaders`/`responseBody` are present only when
-  a response was actually received (absent for a network/timeout failure).
+  response at all. Like `onResponse`, it carries `method`/`url` and the renamed
+  `requestHeaders`/`requestBody`, plus `durationMs`. `error` is the **raw request error, typed
+  `unknown`** — exactly what the transport produced, never re-derived or mapped to `DattoApiError`
+  — because a `throw` guarantees nothing about its own shape. `statusCode`/`responseHeaders`/
+  `responseBody` are present only when a response was actually received (absent for a
+  network/timeout failure).
 
 **Per-attempt, not per logical call.** Each callback fires once per **physical** HTTP attempt, so a
 retried exchange is never collapsed into one event: a `429 → retry → 200` sequence fires
@@ -558,7 +561,9 @@ from a `0.1.x` release, every one of the following changed:
    [Validation](#validation)); this replaces all three old modes with one consistent model.
 4. **Config fields changed.** `autoRefresh` is removed (it was declared but never used in `0.1.x`).
    `userAgentExtra` and `tokenRefreshPct` were also declared-but-unused in `0.1.x`; they are now
-   fully functional. There is no `axiosInstance` config option.
+   fully functional. There is no `axiosInstance` config option — if you injected your own axios
+   instance for observability/audit purposes, see [Observing HTTP
+   exchanges](#observing-http-exchanges-httpobserver) for the supported `httpObserver` replacement.
 5. **The logger interface changed.** `0.1.x` accepted any variadic `LoggerLike` (`(...args: any[])
 => void`, i.e. `console`-shaped) directly. `1.0.0` requires the stricter `DattoLogger`
    (`debug/info/warn/error`, each `(message: string, meta?: Record<string, unknown>) => void`,

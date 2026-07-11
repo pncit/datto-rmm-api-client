@@ -163,7 +163,12 @@ dedicated section elsewhere would be an inconsistent, incomplete documentation p
 publicly-constructed `DattoRmmClient`:
 - Grant observed end-to-end, with the request event's `body` — parsed via `URLSearchParams` — an
   exact match for the raw urlencoded wire string (`grant_type`/`username`/`password`), and both the
-  grant's and the account GET's own `onResponse` events present and `statusCode: 200` (R3).
+  grant's and the account GET's own `onResponse` events present and `statusCode: 200` (R3). The
+  grant request event's `headers` is asserted to carry no `authorization`/`Authorization` key
+  (Phase 3's intentional Basic-auth omission, locked in end-to-end), and the account request
+  event's `headers.Authorization` is asserted to equal the real `Bearer <token>` value produced by
+  the real `AuthManager.attachTo` interceptor — proving the observer-first/attachTo-later
+  interceptor order composes correctly against the real object graph (R9).
 - A 2-page `client.account.devices()` paginated read fires exactly 2 request + 2 terminal
   (`onResponse`) events for the devices-path URL, matching the returned `devices` array's length of
   2 (R4).
@@ -187,11 +192,14 @@ total of 590 tests across 40 files.
 
 - No new dependency; no production code touched at all this phase (`nock`/`vitest` are already dev
   dependencies used identically to every other test in the suite).
-- The lazy-refresh test deliberately exercises the one path where a credential-adjacent secret
-  (the grant's `Authorization: Basic public-client:public` header) never appears in the captured
-  header map by design (Phase 3's documented, intentional omission) — this phase's assertions
-  confirm that omission holds even when observed through the fully assembled client, not just the
-  bare `AuthManager` Phase 3 tested in isolation.
+- The first test (grant observed end-to-end) directly asserts the grant request event's `headers`
+  carries no `authorization`/`Authorization` key — a credential-adjacent secret (the grant's
+  `Authorization: Basic public-client:public` header) that never appears in the captured header map
+  by design (Phase 3's documented, intentional omission). The same test also asserts the account
+  request's `headers.Authorization` equals the real `Bearer <token>` value, proving the real
+  `AuthManager.attachTo` interceptor and the observer interceptor compose in the documented order
+  against the real object graph — closing R9's bearer-token half, which no unit test (all of which
+  substitute a mock `attachTo`) exercises.
 - The README's new section leads with the raw/un-redacted warning in bold, naming the bearer token
   and API key explicitly — before describing any callback's payload fields — so a reader cannot
   skim past the security-relevant caveat before seeing the feature's mechanics.

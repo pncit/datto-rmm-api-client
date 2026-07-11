@@ -63,6 +63,17 @@ function stubGrant(): nock.Scope {
     .reply(200, { access_token: "tok-1", expires_in: 3600 });
 }
 
+/**
+ * Type-safe filter: narrows `ObservedEvent[]` to the payload type for one `kind`, with no `as`
+ * cast at any call site. Overloaded per concrete `kind` (rather than one generic signature keyed
+ * off `Extract<ObservedEvent, { kind: K }>["event"]`) because that generic-indexed-access form hits
+ * a known TypeScript limitation across a 3-member discriminated union: the compiler computes two
+ * structurally-different representations of the same conditional type at the declaration site vs.
+ * the `filter().map()` call site and rejects them as unrelated (confirmed against `tsc` directly).
+ */
+function eventsOf(events: ObservedEvent[], kind: "request"): DattoHttpRequestEvent[];
+function eventsOf(events: ObservedEvent[], kind: "response"): DattoHttpResponseEvent[];
+function eventsOf(events: ObservedEvent[], kind: "error"): DattoHttpErrorEvent[];
 function eventsOf(events: ObservedEvent[], kind: ObservedEvent["kind"]) {
   return events.filter((e) => e.kind === kind).map((e) => e.event);
 }
@@ -90,15 +101,25 @@ describe("HTTP observer seam — assembled client (integration)", () => {
     );
     await client.account.get();
 
-    const requests = eventsOf(events, "request") as DattoHttpRequestEvent[];
+    const requests = eventsOf(events, "request");
     const grantRequest = requests.find((e) => e.url === `${BASE_URL}${GRANT_PATH}`);
-    expect(grantRequest).toBeDefined();
-    const params = new URLSearchParams(grantRequest!.body as string);
+    if (!grantRequest) {
+      throw new Error("expected a grant request event");
+    }
+    if (typeof grantRequest.body !== "string") {
+      throw new Error("expected serialized urlencoded grant body");
+    }
+    const params = new URLSearchParams(grantRequest.body);
     expect(params.get("grant_type")).toBe("password");
     expect(params.get("username")).toBe("test-key");
     expect(params.get("password")).toBe("test-secret");
+    // The grant's own request must never carry a bearer token — the account-request Bearer
+    // interceptor is attached only after the grant client resolves (Phase 3's intentional
+    // Basic-auth-only omission), locked in end-to-end through the real assembled client.
+    expect(grantRequest.headers["authorization"]).toBeUndefined();
+    expect(grantRequest.headers["Authorization"]).toBeUndefined();
 
-    const responses = eventsOf(events, "response") as DattoHttpResponseEvent[];
+    const responses = eventsOf(events, "response");
     const grantResponse = responses.find(
       (e) => e.url === `${BASE_URL}${GRANT_PATH}`,
     );
@@ -112,6 +133,14 @@ describe("HTTP observer seam — assembled client (integration)", () => {
     );
     expect(accountResponse).toBeDefined();
     expect(accountResponse!.statusCode).toBe(200);
+
+    // The account request's own onRequest event carries the real Bearer header the real
+    // AuthManager.attachTo interceptor attached — proving the observer-first/attachTo-later
+    // interceptor order composes correctly against the real object graph, not a unit-test mock
+    // (R9's bearer-token half; design Risk table "instrumentation ordering" entry).
+    const accountRequest = requests.find((e) => e.url === `${BASE_URL}${ACCOUNT_PATH}`);
+    expect(accountRequest).toBeDefined();
+    expect(accountRequest!.headers["Authorization"]).toBe("Bearer tok-1");
   });
 
   it("observes a paginated read of N pages as N request + N terminal events (R4)", async () => {
@@ -143,11 +172,11 @@ describe("HTTP observer seam — assembled client (integration)", () => {
 
     expect(devices).toHaveLength(2);
 
-    const deviceRequests = (eventsOf(events, "request") as DattoHttpRequestEvent[]).filter(
-      (e) => e.url.startsWith(`${BASE_URL}${DEVICES_PATH}`),
+    const deviceRequests = eventsOf(events, "request").filter((e) =>
+      e.url.startsWith(`${BASE_URL}${DEVICES_PATH}`),
     );
-    const deviceResponses = (eventsOf(events, "response") as DattoHttpResponseEvent[]).filter(
-      (e) => e.url.startsWith(`${BASE_URL}${DEVICES_PATH}`),
+    const deviceResponses = eventsOf(events, "response").filter((e) =>
+      e.url.startsWith(`${BASE_URL}${DEVICES_PATH}`),
     );
     // Two pages -> exactly one onRequest + one terminal onResponse per page.
     expect(deviceRequests).toHaveLength(2);
@@ -165,7 +194,7 @@ describe("HTTP observer seam — assembled client (integration)", () => {
 
     await expect(client.account.get()).rejects.toBeInstanceOf(DattoApiError);
 
-    const errors = eventsOf(events, "error") as DattoHttpErrorEvent[];
+    const errors = eventsOf(events, "error");
     expect(errors).toHaveLength(1);
     expect(errors[0]!.url).toBe(`${BASE_URL}${GRANT_PATH}`);
     expect(errors[0]!.statusCode).toBe(401);
@@ -196,13 +225,19 @@ describe("HTTP observer seam — assembled client (integration)", () => {
     );
     const terminal = accountEvents.filter((e) => e.kind !== "request");
     expect(terminal).toHaveLength(2);
-    expect(terminal[0]!.kind).toBe("error");
-    expect((terminal[0]!.event as DattoHttpErrorEvent).statusCode).toBe(429);
-    expect(axios.isAxiosError((terminal[0]!.event as DattoHttpErrorEvent).error)).toBe(
-      true,
-    );
-    expect(terminal[1]!.kind).toBe("response");
-    expect((terminal[1]!.event as DattoHttpResponseEvent).statusCode).toBe(200);
+    const [first, second] = terminal;
+    if (!first || !second) {
+      throw new Error("expected exactly two terminal events");
+    }
+    if (first.kind !== "error") {
+      throw new Error("expected an error event first");
+    }
+    expect(first.event.statusCode).toBe(429);
+    expect(axios.isAxiosError(first.event.error)).toBe(true);
+    if (second.kind !== "response") {
+      throw new Error("expected a response event second");
+    }
+    expect(second.event.statusCode).toBe(200);
   });
 
   it("omitting httpObserver entirely leaves request outcomes unchanged (additive-only sanity)", async () => {

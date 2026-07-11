@@ -84,9 +84,9 @@ export interface DattoHttpErrorEvent {
  * **RAW, UN-REDACTED delivery.** Unlike {@link DattoLogger} (`../logging/logger.ts`), which is
  * always UDF-masked and carries no bodies or headers, these callbacks receive the exchange
  * exactly as it went over the wire — including the `Authorization: Bearer` token on every
- * shared-instance request and the API key in the OAuth grant's form body. The client redacts
- * nothing; a consumer with a compliance/audit obligation must redact on their own side before
- * persisting an event.
+ * shared-instance request and the API key and API secret in the OAuth grant's form body. The
+ * client redacts nothing; a consumer with a compliance/audit obligation must redact on their own
+ * side before persisting an event.
  *
  * A callback that throws, or returns a rejected promise, can never alter, delay, or fail the
  * request — the failure is caught, swallowed, and reported once to the client's logger at `warn`.
