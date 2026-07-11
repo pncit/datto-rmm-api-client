@@ -3048,6 +3048,29 @@
       "phase": 4,
       "attempt": 1,
       "result": "pass"
+    },
+    {
+      "t": 1783731876,
+      "kind": "worker",
+      "agent": "process-historian",
+      "label": "implementation historian",
+      "ok": true,
+      "started_at": "2026-07-11T01:01:18+00:00",
+      "duration_s": 197.3,
+      "api_duration_s": 186.2,
+      "turns": 58,
+      "models": [
+        "claude-opus-4-8"
+      ],
+      "cost_usd": 2.4941,
+      "tokens": {
+        "input": 702,
+        "output": 13427,
+        "cache_read": 1286627,
+        "cache_creation": 151161
+      },
+      "session_id": "fb14f148-3732-4130-9e2b-cfdde9ff152f",
+      "turn": "/home/rob.gilbreath/dev/repos/datto-rmm-api-client/docs/implementation/http-observer-seam/implementation-artifact.md"
     }
   ],
   "amendments": {
