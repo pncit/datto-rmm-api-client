@@ -75,7 +75,7 @@ jobs:
       # calling pncit/shared-actions) because that repo is private and a public
       # repo can't resolve a private org action.
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
