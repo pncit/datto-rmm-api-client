@@ -18,79 +18,47 @@ jobs:
     # runner-safety requirement (fork runs are sandboxed and get no secrets).
     # Drop this `if` if you'd rather give community fork PRs CI feedback.
     if: github.event.pull_request.head.repo.full_name == github.repository
+    # GitHub-hosted: the org's self-hosted runner group does not accept jobs
+    # from public repos (allows_public_repositories=false, on purpose — it
+    # keeps fork PRs off the fleet), so `self-hosted` here could never be
+    # scheduled. Nothing below depends on runner-local state.
     runs-on: ubuntu-latest
     steps:
-      # Single checkout with a little history: fetch-depth: 2 + an explicit
-      # fetch of the base branch gives the version-bump gate the base
-      # package.json to diff against.
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 2
+      # Up-front checkout: required so the local composite actions
+      # (./.github/actions/*) exist on the runner before they're referenced.
+      # The vendored actions live here (not in the private pncit/shared-actions)
+      # because this repo is PUBLIC and can't resolve a private org action —
+      # see .github/actions/README.md.
+      - uses: actions/checkout@v7
 
-      # Version-bump gate (PRs only): datto-rmm-api-client is a published
-      # library, so every PR into main must bump package.json's version —
-      # each merge to main triggers a publish (see npm-publish.yml), and npm
-      # rejects republishing an existing version.
-      #
-      # Dependabot PRs are exempt: they only bump dependency versions, never
-      # the package's own version (that happens at release time), so this gate
-      # would fail 100% of them. The version bump is applied when the batched
-      # dependency updates are released.
-      - name: Verify version changed
-        if: github.actor != 'dependabot[bot]'
-        shell: bash
-        run: |
-          set -euo pipefail
-          CUR=$(node -p "require('./package.json').version || ''")
-
-          BASE_BRANCH="${GITHUB_BASE_REF:-main}"
-          git fetch origin "$BASE_BRANCH:$BASE_BRANCH" || true
-
-          if git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1; then
-            PREV=$(git show "$BASE_BRANCH:package.json" 2>/dev/null \
-              | node -p "(() => { const s=require('fs').readFileSync(0,'utf8'); try { return JSON.parse(s).version || '' } catch { return '' } })()" \
-              || true)
-          else
-            PREV=""
-          fi
-
-          if [ -z "$CUR" ]; then
-            echo "::error::No version found in package.json"
-            exit 1
-          fi
-
-          if [ -n "$PREV" ] && [ "$CUR" = "$PREV" ]; then
-            echo "::error::package.json version unchanged ($PREV -> $CUR). Version must be bumped for PRs."
-            exit 1
-          fi
-
-          if [ -z "$PREV" ]; then
-            echo "Could not determine previous version, skipping version check"
-          else
-            echo "Version changed: $PREV -> $CUR ✓"
-          fi
-
-      # Codebase checks: npm ci + lint + typecheck + test. Inlined (rather than
-      # calling pncit/shared-actions) because that repo is private and a public
-      # repo can't resolve a private org action.
-      - name: Setup Node
-        uses: actions/setup-node@v6
+      # Install the repo's Node (.nvmrc) before the toolchain check: the hosted
+      # image's system Node is whatever Ubuntu ships, not necessarily ours.
+      # validate-codebase below runs setup-node again; that's a cache hit.
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
-          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      # Env check: fail fast if the Node/npm majors don't match what the repo
+      # expects (NODE_MAJOR_VERSION / NPM_MAJOR_VERSION are pncit org-level
+      # Actions variables). Also catches .nvmrc drifting from the org standard.
+      - uses: ./.github/actions/verify-node-toolchain
+        with:
+          node-major-version: ${{ vars.NODE_MAJOR_VERSION }}
+          npm-major-version: ${{ vars.NPM_MAJOR_VERSION }}
 
-      - name: Lint
-        run: npm run lint
+      # Version-bump gate: datto-rmm-api-client is a published library, so
+      # every PR into main must bump package.json's version, or
+      # publish-on-version-bump has nothing to publish after the squash.
+      # Dependabot is exempt (the action's default): it never bumps the
+      # package's own version, so its merges land unpublished until the next
+      # human bump.
+      - uses: ./.github/actions/verify-version-bump
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Test
-        run: npm test
+      # Codebase checks: npm ci + lint + typecheck + test. This action does its
+      # own checkout + setup-node (node-version-file: .nvmrc) and pins npm.
+      - uses: ./.github/actions/validate-codebase
+        with:
+          npm-token: ${{ secrets.NPM_TOKEN }}
 
       # R15: verifies `src/generated/**` reproduces byte-for-byte from the committed spec. Kept
       # out of the default `npm test` (see vitest.config.ts) since it shells out to a full Orval

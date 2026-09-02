@@ -16,18 +16,15 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      # npm ci + lint + typecheck + test. Inlined (rather than calling
-      # pncit/shared-actions) because that repo is private and a public repo
-      # can't resolve a private org action.
+      # Up-front checkout so the local composite action exists on the runner.
+      # Vendored copy of pncit/shared-actions validate-codebase (that repo is
+      # private and a public repo can't resolve it) — see .github/actions/README.md.
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      # npm ci + lint + typecheck + test. Does its own checkout + setup-node
+      # (node-version-file: .nvmrc) and pins npm.
+      - uses: ./.github/actions/validate-codebase
         with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
+          npm-token: ${{ secrets.NPM_TOKEN }}
       # R15: verifies `src/generated/**` reproduces byte-for-byte from the committed spec. Kept
       # out of the default `npm test` (see vitest.config.ts) since it shells out to a full Orval
       # codegen pass and to git; run explicitly here instead.
@@ -41,7 +38,7 @@ jobs:
         with:
           fetch-depth: 2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org
@@ -49,12 +46,10 @@ jobs:
           cache-dependency-path: |
             package-lock.json
 
-      # OIDC trusted publishing requires npm >= 11.5.1. Pin to npm@11 (latest
-      # stable v11.x) rather than @latest: npm v12 introduced a regression where
-      # sigstore is absent from libnpmpublish, causing `npm publish --provenance`
-      # to fail with MODULE_NOT_FOUND (https://github.com/npm/cli/issues/9722).
+      # OIDC trusted publishing requires npm >= 11.5.1. Pinned to the org standard (npm 12,
+      # matching shared-actions validate-codebase); npm/cli#9722 was fixed in 12.0.1.
       - name: Update npm
-        run: npm install -g npm@11
+        run: npm install -g npm@12.0.2
 
       - name: Install dependencies
         run: npm ci
