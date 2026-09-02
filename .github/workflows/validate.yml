@@ -29,12 +29,12 @@ jobs:
       # The vendored actions live here (not in the private pncit/shared-actions)
       # because this repo is PUBLIC and can't resolve a private org action —
       # see .github/actions/README.md.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Install the repo's Node (.nvmrc) before the toolchain check: the hosted
       # image's system Node is whatever Ubuntu ships, not necessarily ours.
       # validate-codebase below runs setup-node again; that's a cache hit.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
 

@@ -12,7 +12,7 @@ description: >-
 #   - uses: actions/setup-node@v7
 #     with:
 #       node-version-file: .nvmrc
-#   - uses: pncit/shared-actions/.github/actions/verify-node-toolchain@v1
+#   - uses: pncit/shared-actions/.github/actions/verify-node-toolchain@v2
 #     with:
 #       node-major-version: ${{ vars.NODE_MAJOR_VERSION }}
 #       npm-major-version: ${{ vars.NPM_MAJOR_VERSION }}
@@ -29,7 +29,7 @@ description: >-
 # `npm ci` ran under npm 12 from the tool cache. Prefer passing the
 # versions through to `validate-codebase`.
 
-# Vendored from pncit/shared-actions@v2 (59e838b) because this repo is PUBLIC
+# Vendored from pncit/shared-actions@v2.1.0 (b164c08) because this repo is PUBLIC
 # and shared-actions is PRIVATE — a public repo can't `uses:` a private
 # action. Byte-for-byte identical to upstream apart from this comment;
 # re-copy when upstream changes (see .github/actions/README.md).
