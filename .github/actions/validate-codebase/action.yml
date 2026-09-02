@@ -1,0 +1,143 @@
+name: 'Validate codebase'
+description: >-
+  Run the standard npm CI gates against the calling repo: `npm ci`,
+  then `npm run lint`, `npm run typecheck`, `npm test`. Each is
+  expected to be defined as a script in the repo's package.json (or to
+  fan out via npm workspaces to per-workspace scripts).
+
+# This composite is the "does the codebase pass the org-standard
+# checks?" assertion. It's one of three validate-* actions:
+#
+#   validate-containers-spec  static check of the deploy `containers` JSON
+#   validate-codebase         (this) lint + typecheck + test against the repo
+#   validate-build            docker build of every container that declares build:
+#
+# Each is invocable independently; callers pick the subset that
+# matches what their workflow needs to check.
+#
+# Does its own checkout + setup-node so it's self-contained — invoke
+# directly from a job's `steps:` with just `uses:` and the npm-token.
+
+# Vendored from pncit/shared-actions@v2 (59e838b) because this repo is PUBLIC
+# and shared-actions is PRIVATE — a public repo can't `uses:` a private
+# action. Byte-for-byte identical to upstream apart from this comment; re-copy
+# when upstream changes (see .github/actions/README.md).
+
+inputs:
+  npm-token:
+    description: 'npm token used for `npm ci` (NODE_AUTH_TOKEN in the install step).'
+    required: true
+  npm-scope:
+    description: 'npm scope (for private packages).'
+    required: false
+    default: '@pncit'
+  registry-url:
+    description: 'npm registry URL.'
+    required: false
+    default: 'https://registry.npmjs.org'
+
+  npm-version:
+    description: >-
+      Exact npm version to pin after setup-node, e.g. "12.0.2". `.nvmrc`
+      pins a Node *major*, so setup-node resolves to whatever 24.x is
+      newest on the day — which is how npm crossed the 11 -> 12 boundary
+      (and started blocking unapproved install scripts) with nothing
+      committed on either side. Pinning here makes that upgrade a
+      deliberate, reviewed edit to one default instead of a surprise.
+      Set to the empty string to opt out and take the bundled npm.
+    required: false
+    default: '12.0.2'
+  node-major-version:
+    description: >-
+      Optional. Required Node major, e.g. "24" — typically
+      vars.NODE_MAJOR_VERSION. When this and npm-major-version are both
+      set, verify-node-toolchain runs *after* setup-node, so it measures
+      the toolchain that actually runs `npm ci`. Callers that invoke
+      verify-node-toolchain as a top-level step are measuring the
+      runner's system Node/npm, which is not what this action uses.
+    required: false
+    default: ''
+  npm-major-version:
+    description: 'Optional. Required npm major, e.g. "12". See node-major-version.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+
+    - name: Setup Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: .nvmrc
+        cache: npm
+        registry-url: ${{ inputs.registry-url }}
+        scope: ${{ inputs.npm-scope }}
+        # actions/setup-node@v6 dropped `always-auth: true` — it was a
+        # v4-era flag and is no longer needed. Specifying it produced an
+        # "Unexpected input" warning during the first real deploy run.
+
+    # Pin npm before anything reads it. setup-node gives us whatever npm
+    # its Node bundles; this makes the version an explicit, reviewable
+    # input instead of a moving target.
+    - name: Pin npm
+      if: inputs.npm-version != ''
+      shell: bash
+      run: |
+        npm i -g "npm@${NPM_VERSION}"
+        echo "npm pinned to $(npm --version) ($(command -v npm))"
+      env:
+        NPM_VERSION: ${{ inputs.npm-version }}
+
+    # Runs here, after Setup Node and the pin, so it asserts against the
+    # toolchain `npm ci` will actually use.
+    - name: Verify Node toolchain
+      if: inputs.node-major-version != '' && inputs.npm-major-version != ''
+      uses: pncit/shared-actions/.github/actions/verify-node-toolchain@main
+      with:
+        node-major-version: ${{ inputs.node-major-version }}
+        npm-major-version: ${{ inputs.npm-major-version }}
+
+    - name: Install dependencies
+      shell: bash
+      env:
+        NODE_AUTH_TOKEN: ${{ inputs.npm-token }}
+      run: npm ci 2>&1 | tee "${RUNNER_TEMP}/npm-ci.log"
+
+    # npm 11.16.0 added per-package install-script allowlists (the
+    # `allowScripts` field in package.json). npm 11 warns and still runs
+    # them; npm 12 blocks them -- and `npm ci` exits 0 either way, so a
+    # native module can silently never build. That is what took
+    # documentation-server's whole suite down with 262 "Could not locate
+    # the bindings file" errors against a green `npm ci`.
+    #
+    # Both the warn-phase and block-phase messages contain the literal
+    # string `allowScripts`, so matching that catches the block and also
+    # gives early warning on a runner still effectively on npm 11.
+    #
+    # Warning, not error, on purpose: most pncit repos have no
+    # `allowScripts` field yet, and failing here would red them all at
+    # once. Flip to ::error:: once the org-wide rollout lands.
+    - name: Audit skipped install scripts
+      shell: bash
+      run: |
+        if grep -q 'allowScripts' "${RUNNER_TEMP}/npm-ci.log"; then
+          grep 'allowScripts' "${RUNNER_TEMP}/npm-ci.log" >&2
+          echo "::warning::npm flagged or skipped one or more install scripts. If any is a native module, it did not build and the install still reported success. Approve with: npx npm@${NPM_VERSION:-12} install-scripts approve <pkg>, then commit the package.json allowScripts change."
+        fi
+      env:
+        NPM_VERSION: ${{ inputs.npm-version }}
+
+    - name: Lint
+      shell: bash
+      run: npm run lint
+
+    - name: Typecheck
+      shell: bash
+      run: npm run typecheck
+
+    - name: Test
+      shell: bash
+      run: npm test

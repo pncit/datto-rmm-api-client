@@ -1,0 +1,148 @@
+name: 'Verify version bump'
+description: >-
+  One observation: does package.json's `version` differ from the one at a
+  reference commit? On a pull_request the reference is the base branch, so
+  the check answers "will publish-on-version-bump have something to publish
+  after this merges?" before review instead of as a red run on main. On a
+  push it is the previous commit, which is how the publish workflow itself
+  decides whether to publish or skip.
+
+# PR gate (fails unless the version was bumped; Dependabot exempt):
+#
+#   - uses: pncit/shared-actions/.github/actions/verify-version-bump@v2
+#
+# Publish-side detection (never fails; gate the publish job on the output):
+#
+#   check-version:
+#     outputs:
+#       changed: ${{ steps.bump.outputs.changed }}
+#     steps:
+#       - id: bump
+#         uses: pncit/shared-actions/.github/actions/verify-version-bump@v2
+#         with:
+#           fail-if-unchanged: false
+#   publish:
+#     needs: check-version
+#     if: needs.check-version.outputs.changed == 'true'
+#
+# Does its own checkout (fetch-depth 2 plus a fetch of the reference), so it
+# can run first in a job; a later validate-codebase will check out again.
+
+# Vendored from pncit/shared-actions@v2 (59e838b) because this repo is PUBLIC
+# and shared-actions is PRIVATE — a public repo can't `uses:` a private
+# action. Byte-for-byte identical to upstream apart from this comment; re-copy
+# when upstream changes (see .github/actions/README.md).
+
+inputs:
+  compare-to:
+    description: >-
+      Git ref holding the previous package.json. Default: the PR base branch
+      on pull_request events, otherwise HEAD^.
+    required: false
+    default: ''
+  package-path:
+    description: 'Path to the package.json to inspect, relative to the repo root.'
+    required: false
+    default: 'package.json'
+  fail-if-unchanged:
+    description: >-
+      "true" fails the step when the version is unchanged (PR gate);
+      "false" only reports it via the `changed` output (publish-side skip).
+    required: false
+    default: 'true'
+  exempt-actors:
+    description: >-
+      Comma-separated GitHub actors for whom an unchanged version is not a
+      failure. Dependabot only ever moves dependency versions, never the
+      package's own; its merges land unpublished until the next human bump.
+    required: false
+    default: 'dependabot[bot]'
+
+outputs:
+  changed:
+    description: '"true" if the version differs from the reference (or the reference has no package.json).'
+    value: ${{ steps.bump.outputs.changed }}
+  name:
+    description: 'package.json name.'
+    value: ${{ steps.bump.outputs.name }}
+  current:
+    description: 'package.json version at HEAD.'
+    value: ${{ steps.bump.outputs.current }}
+  previous:
+    description: 'package.json version at the reference, or empty if none.'
+    value: ${{ steps.bump.outputs.previous }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 2
+
+    - name: Compare package.json version with the reference
+      id: bump
+      shell: bash
+      env:
+        COMPARE_TO: ${{ inputs.compare-to }}
+        PACKAGE_PATH: ${{ inputs.package-path }}
+        FAIL_IF_UNCHANGED: ${{ inputs.fail-if-unchanged }}
+        EXEMPT_ACTORS: ${{ inputs.exempt-actors }}
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_REF: ${{ github.base_ref }}
+        ACTOR: ${{ github.actor }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "$COMPARE_TO" ]; then
+          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_REF"
+            COMPARE_TO="origin/$BASE_REF"
+          else
+            COMPARE_TO="HEAD^"
+          fi
+        fi
+
+        read_version() {
+          node -p "(() => { const s = require('fs').readFileSync(0, 'utf8'); try { return JSON.parse(s).version || '' } catch { return '' } })()"
+        }
+
+        NAME=$(node -p "require('./$PACKAGE_PATH').name || ''")
+        CUR=$(node -p "require('./$PACKAGE_PATH').version || ''")
+        if [ -z "$CUR" ]; then
+          echo "::error::$PACKAGE_PATH has no version"
+          exit 1
+        fi
+
+        PREV=""
+        if git rev-parse --verify --quiet "$COMPARE_TO" >/dev/null; then
+          PREV=$(git show "$COMPARE_TO:$PACKAGE_PATH" 2>/dev/null | read_version || true)
+        fi
+
+        {
+          echo "name=$NAME"
+          echo "current=$CUR"
+          echo "previous=$PREV"
+        } >> "$GITHUB_OUTPUT"
+
+        if [ -n "$PREV" ] && [ "$CUR" = "$PREV" ]; then
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+          case ",$EXEMPT_ACTORS," in
+            *",$ACTOR,"*)
+              echo "::notice::$NAME version unchanged ($CUR); $ACTOR is exempt from the bump gate."
+              exit 0 ;;
+          esac
+          if [ "$FAIL_IF_UNCHANGED" = "true" ]; then
+            echo "::error::$NAME version unchanged ($PREV -> $CUR) against $COMPARE_TO. Bump $PACKAGE_PATH so the merge has something to publish."
+            exit 1
+          fi
+          echo "::notice::$NAME version unchanged ($CUR) — nothing to publish."
+          exit 0
+        fi
+
+        echo "changed=true" >> "$GITHUB_OUTPUT"
+        if [ -z "$PREV" ]; then
+          echo "No $PACKAGE_PATH at $COMPARE_TO; treating $CUR as new."
+        else
+          echo "Version changed: $PREV -> $CUR"
+        fi
