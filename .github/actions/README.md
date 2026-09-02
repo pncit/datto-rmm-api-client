@@ -26,6 +26,13 @@ to upstream (apart from the header comment) so a sync is a trivial file diff —
 do **not** locally "optimize" inputs or steps; consistency with upstream is the
 point.
 
+**One deliberate deviation:** `validate-codebase` upstream contains a nested
+`uses: pncit/shared-actions/.github/actions/verify-node-toolchain@main`. Actions
+resolves every nested `uses:` when the step is prepared, even when its `if:` is
+false, so the private ref fails here with `Unable to resolve action`. The
+vendored copy points that line at `./.github/actions/verify-node-toolchain`
+instead. Keep that redirect when re-copying.
+
 | local action | upstream |
 |---|---|
 | `validate-codebase/action.yml` | `pncit/shared-actions/.github/actions/validate-codebase` |

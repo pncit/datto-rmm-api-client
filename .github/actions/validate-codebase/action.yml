@@ -20,8 +20,9 @@ description: >-
 
 # Vendored from pncit/shared-actions@v2 (59e838b) because this repo is PUBLIC
 # and shared-actions is PRIVATE — a public repo can't `uses:` a private
-# action. Byte-for-byte identical to upstream apart from this comment; re-copy
-# when upstream changes (see .github/actions/README.md).
+# action. Byte-for-byte identical to upstream apart from this comment and the
+# nested verify-node-toolchain `uses:` (redirected to the local copy);
+# re-copy when upstream changes (see .github/actions/README.md).
 
 inputs:
   npm-token:
@@ -95,7 +96,7 @@ runs:
     # toolchain `npm ci` will actually use.
     - name: Verify Node toolchain
       if: inputs.node-major-version != '' && inputs.npm-major-version != ''
-      uses: pncit/shared-actions/.github/actions/verify-node-toolchain@main
+      uses: ./.github/actions/verify-node-toolchain
       with:
         node-major-version: ${{ inputs.node-major-version }}
         npm-major-version: ${{ inputs.npm-major-version }}
