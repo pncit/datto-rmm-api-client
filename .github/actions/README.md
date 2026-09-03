@@ -2,7 +2,7 @@
 
 These are **local mirrors** (vendored copies) of composite actions from the
 private [`pncit/shared-actions`](https://github.com/pncit/shared-actions) repo,
-currently at `v2.4.0` (`dfb52a3`).
+currently at `v3.0.0` (`8bc187e`).
 
 ## Why they're copied here
 
@@ -29,5 +29,4 @@ point.
 | local action | upstream |
 |---|---|
 | `validate-codebase/action.yml` | `pncit/shared-actions/.github/actions/validate-codebase` |
-| `verify-node-toolchain/action.yml` | `pncit/shared-actions/.github/actions/verify-node-toolchain` |
 | `verify-version-bump/action.yml` | `pncit/shared-actions/.github/actions/verify-version-bump` |

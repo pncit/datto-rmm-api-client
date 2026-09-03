@@ -31,21 +31,6 @@ jobs:
       # see .github/actions/README.md.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Install the repo's Node (.nvmrc) before the toolchain check: the hosted
-      # image's system Node is whatever Ubuntu ships, not necessarily ours.
-      # validate-codebase below runs setup-node again; that's a cache hit.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-
-      # Env check: fail fast if the Node/npm majors don't match what the repo
-      # expects (NODE_MAJOR_VERSION / NPM_MAJOR_VERSION are pncit org-level
-      # Actions variables). Also catches .nvmrc drifting from the org standard.
-      - uses: ./.github/actions/verify-node-toolchain
-        with:
-          node-major-version: ${{ vars.NODE_MAJOR_VERSION }}
-          npm-major-version: ${{ vars.NPM_MAJOR_VERSION }}
-
       # Version-bump gate: datto-rmm-api-client is a published library, so
       # every PR into main must bump package.json's version, or
       # publish-on-version-bump has nothing to publish after the squash.
@@ -53,12 +38,20 @@ jobs:
       # package's own version, so its merges land unpublished until the next
       # human bump.
       - uses: ./.github/actions/verify-version-bump
+        with:
+          # .nvmrc went with shared-actions v3.0.0 (Node is vars.NODE_VERSION now);
+          # deleting it ships nothing, so it must not force a release either.
+          exempt-paths: |
+            .github/**
+            .nvmrc
 
       # Codebase checks: npm ci + lint + typecheck + test. This action does its
-      # own checkout + setup-node (node-version-file: .nvmrc) and pins npm.
+      # own checkout + setup-node (vars.NODE_VERSION) and pins npm.
       - uses: ./.github/actions/validate-codebase
         with:
           npm-token: ${{ secrets.NPM_TOKEN }}
+          node-version: ${{ vars.NODE_VERSION }}
+          npm-version: ${{ vars.NPM_VERSION }}
 
       # R15: verifies `src/generated/**` reproduces byte-for-byte from the committed spec. Kept
       # out of the default `npm test` (see vitest.config.ts) since it shells out to a full Orval
