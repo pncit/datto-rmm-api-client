@@ -21,10 +21,12 @@ jobs:
       # private and a public repo can't resolve it) — see .github/actions/README.md.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # npm ci + lint + typecheck + test. Does its own checkout + setup-node
-      # (node-version-file: .nvmrc) and pins npm.
+      # (vars.NODE_VERSION) and pins npm.
       - uses: ./.github/actions/validate-codebase
         with:
           npm-token: ${{ secrets.NPM_TOKEN }}
+          node-version: ${{ vars.NODE_VERSION }}
+          npm-version: ${{ vars.NPM_VERSION }}
       # R15: verifies `src/generated/**` reproduces byte-for-byte from the committed spec. Kept
       # out of the default `npm test` (see vitest.config.ts) since it shells out to a full Orval
       # codegen pass and to git; run explicitly here instead.
@@ -40,7 +42,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .nvmrc
+          node-version: ${{ vars.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
           cache: npm
           cache-dependency-path: |

@@ -36,7 +36,7 @@ description: >-
 # Does its own checkout (fetch-depth 2 plus a fetch of the reference), so it
 # can run first in a job; a later validate-codebase will check out again.
 
-# Vendored from pncit/shared-actions@v2.4.0 (dfb52a3) because this repo is PUBLIC
+# Vendored from pncit/shared-actions@v3.0.0 (8bc187e) because this repo is PUBLIC
 # and shared-actions is PRIVATE — a public repo can't `uses:` a private
 # action. Byte-for-byte identical to upstream apart from this comment;
 # re-copy when upstream changes (see .github/actions/README.md).
