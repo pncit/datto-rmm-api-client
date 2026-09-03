@@ -18,7 +18,7 @@ description: >-
 # Does its own checkout + setup-node so it's self-contained — invoke
 # directly from a job's `steps:` with just `uses:` and the npm-token.
 
-# Vendored from pncit/shared-actions@v2.1.0 (b164c08) because this repo is PUBLIC
+# Vendored from pncit/shared-actions@v2.4.0 (dfb52a3) because this repo is PUBLIC
 # and shared-actions is PRIVATE — a public repo can't `uses:` a private
 # action. Byte-for-byte identical to upstream apart from this comment;
 # re-copy when upstream changes (see .github/actions/README.md).
@@ -72,7 +72,17 @@ runs:
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version-file: .nvmrc
-        cache: npm
+        # The GitHub cache service only pays off on a fresh VM. On the
+        # self-hosted fleet ~/.npm persists between jobs, so `npm ci` is
+        # already warm — while `cache: npm` cost every job with a changed
+        # lockfile (every Dependabot PR) a restore miss plus a post-job
+        # tar+zstd+upload of the whole shared ~/.npm: 1 GB at ~2 MB/s,
+        # ten minutes of runner occupancy and a 1 GB temp file per job.
+        # Interrupted mid-upload (cancel, disk full, worker killed) the
+        # cache-save child outlives the job and spins at 100 % CPU. So:
+        # cache on GitHub-hosted runners only.
+        cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
+        package-manager-cache: ${{ runner.environment == 'github-hosted' }}
         registry-url: ${{ inputs.registry-url }}
         scope: ${{ inputs.npm-scope }}
         # actions/setup-node@v6 dropped `always-auth: true` — it was a

@@ -7,9 +7,17 @@ description: >-
   push it is the previous commit, which is how the publish workflow itself
   decides whether to publish or skip.
 
-# PR gate (fails unless the version was bumped; Dependabot exempt):
+# PR gate (fails unless the version was bumped; Dependabot and PRs that touch
+# only `.github/**` are exempt):
 #
 #   - uses: pncit/shared-actions/.github/actions/verify-version-bump@v2
+#
+# PR gate with no path exemption — every PR must bump, the rule as it stood
+# before exempt-paths existed:
+#
+#   - uses: pncit/shared-actions/.github/actions/verify-version-bump@v2
+#     with:
+#       exempt-paths: ''
 #
 # Publish-side detection (never fails; gate the publish job on the output):
 #
@@ -28,7 +36,7 @@ description: >-
 # Does its own checkout (fetch-depth 2 plus a fetch of the reference), so it
 # can run first in a job; a later validate-codebase will check out again.
 
-# Vendored from pncit/shared-actions@v2.1.0 (b164c08) because this repo is PUBLIC
+# Vendored from pncit/shared-actions@v2.4.0 (dfb52a3) because this repo is PUBLIC
 # and shared-actions is PRIVATE — a public repo can't `uses:` a private
 # action. Byte-for-byte identical to upstream apart from this comment;
 # re-copy when upstream changes (see .github/actions/README.md).
@@ -57,6 +65,20 @@ inputs:
       package's own; its merges land unpublished until the next human bump.
     required: false
     default: 'dependabot[bot]'
+  exempt-paths:
+    description: >-
+      Newline-separated globs (`*`, `?`, `**`). On a pull_request, if EVERY
+      file the PR changes matches one of them, an unchanged version is not a
+      failure — the PR changes nothing that ships, so there is nothing to
+      publish. The default covers the org-wide SHA-pin sweeps: re-pinning
+      shared-actions is a `.github/workflows/*.yml`-only PR, and forcing a
+      patch bump on each of ~10 published libraries would ship ~10 releases
+      whose tarballs are byte-identical to the previous ones. Set to the
+      empty string to require a bump on every PR regardless of what it
+      touches. Ignored on push events (the publish side compares to HEAD^ and
+      never fails). Lines starting with `#` are comments.
+    required: false
+    default: '.github/**'
 
 outputs:
   changed:
@@ -71,6 +93,12 @@ outputs:
   previous:
     description: 'package.json version at the reference, or empty if none.'
     value: ${{ steps.bump.outputs.previous }}
+  exempt:
+    description: >-
+      Why an unchanged version was not a failure: "actor" (exempt-actors),
+      "paths" (every changed file matched exempt-paths), or empty (no
+      exemption applied — the version changed, or the gate failed).
+    value: ${{ steps.bump.outputs.exempt }}
 
 runs:
   using: composite
@@ -88,14 +116,20 @@ runs:
         PACKAGE_PATH: ${{ inputs.package-path }}
         FAIL_IF_UNCHANGED: ${{ inputs.fail-if-unchanged }}
         EXEMPT_ACTORS: ${{ inputs.exempt-actors }}
+        EXEMPT_PATHS: ${{ inputs.exempt-paths }}
         EVENT_NAME: ${{ github.event_name }}
         BASE_REF: ${{ github.base_ref }}
         ACTOR: ${{ github.actor }}
       run: |
         set -euo pipefail
 
+        IS_PR=false
+        if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ]; then
+          IS_PR=true
+        fi
+
         if [ -z "$COMPARE_TO" ]; then
-          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ]; then
+          if [ "$IS_PR" = true ]; then
             git fetch --no-tags --depth=1 origin "$BASE_REF"
             COMPARE_TO="origin/$BASE_REF"
           else
@@ -106,6 +140,71 @@ runs:
         read_version() {
           node -p "(() => { const s = require('fs').readFileSync(0, 'utf8'); try { return JSON.parse(s).version || '' } catch { return '' } })()"
         }
+
+        # Files this PR changes, computed without a merge base — because we
+        # don't have one. The checkout above is depth 2, and deepening until a
+        # merge base appears is unbounded work on a repo with a long-lived
+        # branch, so `base...head` is out.
+        #
+        # actions/checkout puts a pull_request run on refs/pull/N/merge: a merge
+        # commit whose first parent is the base tip and whose second is the PR
+        # head, and depth 2 brings both parents along. `diff HEAD^1 HEAD` is then
+        # exactly the net change this PR lands on base — the same set the
+        # three-dot form would give, already computed by GitHub against the real
+        # merge base. No deeper fetch, no REST call, and nothing new in
+        # `permissions:` for the consumer repos to grant (they run the gate with
+        # `contents: read`, and reading pulls/N/files is not covered by it).
+        #
+        # Fallback, for a checkout that isn't the merge ref — pull_request_target
+        # takes the base branch — is the two-dot `diff <base tip> HEAD`. It needs
+        # no shared history either (it compares two trees) but additionally
+        # reports files that moved on base since the branch point. Those can only
+        # ADD to the list, i.e. make a PR *less* exempt, and the org's strict
+        # up-to-date rule forces a re-run on a refreshed head before merge, where
+        # the noise is gone. Erring that way is deliberate: a spurious "bump the
+        # version" is a nuisance, a wrongly skipped publish is a library that
+        # quietly stops shipping.
+        changed_files() {
+          if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+            git diff --name-only HEAD^1 HEAD
+          elif git rev-parse --verify --quiet "$COMPARE_TO" >/dev/null; then
+            git diff --name-only "$COMPARE_TO" HEAD
+          fi
+        }
+
+        # Glob matching in node, not bash: `globstar` is off by default in a
+        # non-interactive shell, `extglob` has no directory-spanning `**` at all,
+        # and turning either on inside a composite step changes glob behaviour
+        # for whatever the caller runs next. Node is already a dependency here
+        # (read_version), so this costs nothing extra.
+        #
+        # Reads the changed files on stdin and prints the ones matching NOTHING
+        # in exempt-paths — empty output means every file is exempt. `**` spans
+        # directory separators, `*` and `?` stop at `/`, everything else is
+        # literal.
+        #
+        # shellcheck disable=SC2016  # single quotes on purpose: this is JS source, not shell
+        MATCH_JS='
+        const globs = (process.env.EXEMPT_PATHS || "").split("\n")
+          .map(s => s.trim()).filter(s => s && !s.startsWith("#"));
+        const res = globs.map(g => {
+          let r = "";
+          for (let i = 0; i < g.length; i++) {
+            const c = g[i];
+            if (c === "*" && g[i + 1] === "*") {
+              i++;
+              if (g[i + 1] === "/") { i++; r += "(?:[^/]+/)*"; } else { r += ".*"; }
+            } else if (c === "*") { r += "[^/]*"; }
+            else if (c === "?") { r += "[^/]"; }
+            else { r += c.replace(/[.+^${}()|[\]\\]/g, "\\$&"); }
+          }
+          return new RegExp("^" + r + "$");
+        });
+        require("fs").readFileSync(0, "utf8").split("\n")
+          .map(s => s.trim()).filter(Boolean)
+          .filter(f => !res.some(re => re.test(f)))
+          .forEach(f => console.log(f));
+        '
 
         NAME=$(node -p "require('./$PACKAGE_PATH').name || ''")
         CUR=$(node -p "require('./$PACKAGE_PATH').version || ''")
@@ -129,9 +228,37 @@ runs:
           echo "changed=false" >> "$GITHUB_OUTPUT"
           case ",$EXEMPT_ACTORS," in
             *",$ACTOR,"*)
+              echo "exempt=actor" >> "$GITHUB_OUTPUT"
               echo "::notice::$NAME version unchanged ($CUR); $ACTOR is exempt from the bump gate."
               exit 0 ;;
           esac
+
+          # PR events only. The publish side runs on push against HEAD^, where
+          # "changed nothing publishable" and "changed nothing" are the same
+          # answer — changed=false, publish job skipped — and there is no PR
+          # whose file list this would mean anything against.
+          if [ "$IS_PR" = true ] && [ -n "$EXEMPT_PATHS" ]; then
+            FILES=$(changed_files)
+            if [ -z "$FILES" ]; then
+              # Never exempt on an empty list. "Every changed file matches" is
+              # vacuously true of zero files, and an empty diff here means we
+              # failed to see the PR's changes, not that it has none.
+              echo "::warning::Could not determine which files this PR changes; exempt-paths not applied."
+            else
+              OUTSIDE=$(printf '%s\n' "$FILES" | node -e "$MATCH_JS")
+              if [ -z "$OUTSIDE" ]; then
+                echo "Changed files, all matching exempt-paths:"
+                printf '%s\n' "$FILES" | sed 's/^/  /'
+                echo "exempt=paths" >> "$GITHUB_OUTPUT"
+                echo "::notice::$NAME version unchanged ($CUR); this PR changes nothing that ships, so there is nothing to publish and no bump to make."
+                exit 0
+              fi
+              echo "Changed outside exempt-paths, so the bump gate applies:"
+              printf '%s\n' "$OUTSIDE" | sed 's/^/  /'
+            fi
+          fi
+
+          echo "exempt=" >> "$GITHUB_OUTPUT"
           if [ "$FAIL_IF_UNCHANGED" = "true" ]; then
             echo "::error::$NAME version unchanged ($PREV -> $CUR) against $COMPARE_TO. Bump $PACKAGE_PATH so the merge has something to publish."
             exit 1
@@ -141,6 +268,7 @@ runs:
         fi
 
         echo "changed=true" >> "$GITHUB_OUTPUT"
+        echo "exempt=" >> "$GITHUB_OUTPUT"
         if [ -z "$PREV" ]; then
           echo "No $PACKAGE_PATH at $COMPARE_TO; treating $CUR as new."
         else

@@ -2,7 +2,7 @@
 
 These are **local mirrors** (vendored copies) of composite actions from the
 private [`pncit/shared-actions`](https://github.com/pncit/shared-actions) repo,
-currently at `v2.1.0` (`b164c08`).
+currently at `v2.4.0` (`dfb52a3`).
 
 ## Why they're copied here
 
