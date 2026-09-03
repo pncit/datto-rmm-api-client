@@ -19,7 +19,7 @@ description: >-
 # directly from a job's `steps:` with the npm-token and the two toolchain
 # versions (`vars.NODE_VERSION`, `vars.NPM_VERSION`).
 
-# Vendored from pncit/shared-actions@v3.0.0 (8bc187e) because this repo is PUBLIC
+# Vendored from pncit/shared-actions@v3.1.0 (4281e5b) because this repo is PUBLIC
 # and shared-actions is PRIVATE — a public repo can't `uses:` a private
 # action. Byte-for-byte identical to upstream apart from this comment;
 # re-copy when upstream changes (see .github/actions/README.md).
@@ -150,15 +150,18 @@ runs:
     # string `allowScripts`, so matching that catches the block and also
     # gives early warning on a runner still effectively on npm 11.
     #
-    # Warning, not error, on purpose: most pncit repos have no
-    # `allowScripts` field yet, and failing here would red them all at
-    # once. Flip to ::error:: once the org-wide rollout lands.
+    # Fatal since v3.1.0: every pncit Node repo declares `allowScripts`
+    # (pncit/.github#24), so a hit here means a dependency bump brought a
+    # new or re-versioned install script that nobody has looked at yet.
+    # The fix is the one the message gives -- approve or deny it in
+    # package.json -- not to loosen this step.
     - name: Audit skipped install scripts
       shell: bash
       run: |
         if grep -q 'allowScripts' "${RUNNER_TEMP}/npm-ci.log"; then
           grep 'allowScripts' "${RUNNER_TEMP}/npm-ci.log" >&2
-          echo "::warning::npm flagged or skipped one or more install scripts. If any is a native module, it did not build and the install still reported success. Approve with: npx npm@${NPM_VERSION} install-scripts approve <pkg>, then commit the package.json allowScripts change."
+          echo "::error::npm flagged or skipped one or more install scripts. If any is a native module, it did not build and the install still reported success. Review with: npx npm@${NPM_VERSION} install-scripts ls, then approve <pkg> (or deny <pkg>) and commit the package.json allowScripts change."
+          exit 1
         fi
       env:
         NPM_VERSION: ${{ inputs.npm-version }}
