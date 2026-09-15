@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { resetApiKeysResponse } from "../../generated/schemas/-v2-user/-v2-user.zod";
+import { ResetApiKeysResponse as resetApiKeysResponse } from "../../generated/schemas/-v2-user/-v2-user.zod";
 import type { AuthUser } from "../../generated/types/authUser";
 import type { AuthUserKey } from "../../generated/types/authUserKey";
 import type { GetUsersParams } from "../../generated/types/getUsersParams";

@@ -1,20 +1,20 @@
 import { z } from "zod";
 
 import {
-  createAccountVariableBody,
-  updateAccountVariableBody,
+  CreateAccountVariableBody as createAccountVariableBody,
+  UpdateAccountVariableBody as updateAccountVariableBody,
 } from "../generated/schemas/-v2-account/-v2-account.zod";
 import {
-  createQuickJobBody,
-  setUdfFieldsBody,
-  setWarrantyDataBody,
+  CreateQuickJobBody as createQuickJobBody,
+  SetUdfFieldsBody as setUdfFieldsBody,
+  SetWarrantyDataBody as setWarrantyDataBody,
 } from "../generated/schemas/-v2-device/-v2-device.zod";
 import {
-  createBody as createSiteBody,
-  createSiteVariableBody,
-  updateBody as updateSiteBody,
-  updateProxyBody,
-  updateSiteVariableBody,
+  CreateBody as createSiteBody,
+  CreateSiteVariableBody as createSiteVariableBody,
+  UpdateBody as updateSiteBody,
+  UpdateProxyBody as updateProxyBody,
+  UpdateSiteVariableBody as updateSiteVariableBody,
 } from "../generated/schemas/-v2-site/-v2-site.zod";
 
 /**

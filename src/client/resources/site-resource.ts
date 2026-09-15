@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 import {
-  getSiteResponse,
-  getSiteSettingsResponse,
-  updateProxyResponse,
+  GetSiteResponse as getSiteResponse,
+  GetSiteSettingsResponse as getSiteSettingsResponse,
+  UpdateProxyResponse as updateProxyResponse,
 } from "../../generated/schemas/-v2-site/-v2-site.zod";
 import type { CreateSiteRequest } from "../../generated/types/createSiteRequest";
 import type { DeviceNetworkInterface } from "../../generated/types/deviceNetworkInterface";

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getByUidResponse } from "../generated/schemas/-v2-device/-v2-device.zod";
+import { GetByUidResponse as getByUidResponse } from "../generated/schemas/-v2-device/-v2-device.zod";
 
 /**
  * Reconciles the generated `Device` response schema against production reality (R8, design
