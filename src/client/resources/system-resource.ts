@@ -1,7 +1,7 @@
 import {
-  getPaginationConfigurationsResponse,
-  getResponse as getRequestRateResponse,
-  getStatusResponse,
+  GetPaginationConfigurationsResponse as getPaginationConfigurationsResponse,
+  GetResponse as getRequestRateResponse,
+  GetStatusResponse as getStatusResponse,
 } from "../../generated/schemas/-v2-system/-v2-system.zod";
 import type { PaginationConfiguration } from "../../generated/types/paginationConfiguration";
 import type { RateStatusResponse } from "../../generated/types/rateStatusResponse";

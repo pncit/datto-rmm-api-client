@@ -1,4 +1,4 @@
-import { createQuickJobResponse } from "../../generated/schemas/-v2-device/-v2-device.zod";
+import { CreateQuickJobResponse as createQuickJobResponse } from "../../generated/schemas/-v2-device/-v2-device.zod";
 import type { CreateQuickJobRequest } from "../../generated/types/createQuickJobRequest";
 import type { CreateQuickJobResponse } from "../../generated/types/createQuickJobResponse";
 import {

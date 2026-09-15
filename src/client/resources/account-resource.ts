@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getUserAccountResponse } from "../../generated/schemas/-v2-account/-v2-account.zod";
+import { GetUserAccountResponse as getUserAccountResponse } from "../../generated/schemas/-v2-account/-v2-account.zod";
 import type { Account } from "../../generated/types/account";
 import type { Component } from "../../generated/types/component";
 import type { DnetSiteMappingsDto } from "../../generated/types/dnetSiteMappingsDto";

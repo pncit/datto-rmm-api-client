@@ -6,6 +6,11 @@
  * `spec/openapi.patched.json` that Orval actually consumes, applying deterministic
  * structural corrections generation cannot infer on its own:
  *
+ *  - `components.schemas` keys that violate the OAS component-key character class
+ *    (`^[a-zA-Z0-9.\-_]+$`) are renamed to the PascalCase form Orval already derived the
+ *    generated type name from, and every `$ref` to them is repointed — see
+ *    `normalizeComponentKeys`. Datto ships four space-separated schema names; Orval v8 validates
+ *    component keys and refuses to generate on them, where v7 silently accepted them.
  *  - Known timestamp properties typed `string`/`date-time` are retyped to `integer`/`int64`
  *    (Datto returns epoch-ms at runtime, not ISO strings).
  *  - `Alert.alertContext`'s `oneOf` (a `*Context` fan-out the wire's Jackson `@class`
@@ -588,6 +593,138 @@ function fixMalformedNonStringConstraints(spec) {
 }
 
 /**
+ * The component-key character class OpenAPI 3.0/3.1 fixes for every key under `components.*`.
+ *
+ * @see https://spec.openapis.org/oas/v3.0.3.html#components-object
+ */
+const COMPONENT_KEY_PATTERN = /^[a-zA-Z0-9.\-_]+$/;
+
+/**
+ * PascalCases a raw component name the way Orval derives a TypeScript type name from it
+ * (`'Account Descriptor'` -> `'AccountDescriptor'`). Deliberately identical to
+ * `widen-response-enums.mjs`'s `toPascalCase` — the two have to agree, since that script matches
+ * its request-only set against Orval's emitted type names.
+ *
+ * @param {string} rawName
+ * @returns {string}
+ */
+function toPascalCase(rawName) {
+  return rawName
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join("");
+}
+
+/**
+ * Rewrites every `$ref` in `node` (in place, recursively) whose target is a renamed
+ * `#/components/schemas/*` entry.
+ *
+ * Walks the raw JSON rather than `walkSchema`, because a `$ref` to a component schema can sit
+ * anywhere a Schema Object can — including places the schema walker deliberately does not reach
+ * (path-level `parameters`, `requestBody.content[*].schema`, response content, and any vendor
+ * extension that happens to carry one). A missed `$ref` would dangle silently, so the sweep is
+ * intentionally structure-agnostic.
+ *
+ * @param {unknown} node
+ * @param {Map<string, string>} renames old component name -> new component name
+ * @returns {void}
+ */
+function rewriteComponentRefs(node, renames) {
+  if (Array.isArray(node)) {
+    for (const item of node) rewriteComponentRefs(item, renames);
+    return;
+  }
+  if (node === null || typeof node !== "object") return;
+
+  const record = /** @type {Record<string, unknown>} */ (node);
+  for (const [key, value] of Object.entries(record)) {
+    if (
+      key === "$ref" &&
+      typeof value === "string" &&
+      value.startsWith(COMPONENTS_SCHEMAS_PREFIX)
+    ) {
+      const target = value.slice(COMPONENTS_SCHEMAS_PREFIX.length);
+      const renamed = renames.get(target);
+      if (renamed !== undefined) {
+        record[key] = COMPONENTS_SCHEMAS_PREFIX + renamed;
+      }
+      continue;
+    }
+    rewriteComponentRefs(value, renames);
+  }
+}
+
+/**
+ * Renames `components.schemas` keys that violate the OAS component-key character class, and
+ * repoints every `$ref` that targeted them.
+ *
+ * Datto's published spec names four component schemas with spaces — `'Account Descriptor'`,
+ * `'Device Network Interface'`, `'Variable Creation Request'`, `'Variable Update Request'` —
+ * which OpenAPI 3.0/3.1 do not permit (`^[a-zA-Z0-9.\-_]+$`). Orval tolerated this through v7
+ * but validates component keys as of v8 and refuses to generate, so the non-conformance has to
+ * be corrected in the patched spec rather than worked around by disabling validation
+ * (`input.unsafeDisableValidation`, which would also switch off full-document validation and is
+ * documented as unsupported).
+ *
+ * The replacement name is the PascalCase form Orval was *already* deriving the TypeScript type
+ * name from, so this renames the spec key to what the generated surface has always been called:
+ * `'Account Descriptor'` -> `AccountDescriptor` was and remains `export interface
+ * AccountDescriptor`. Generated output is unchanged by this patch.
+ *
+ * Fails loud if a normalized name is still invalid or would collide with another component —
+ * either means the rename is no longer a pure spelling correction and needs a human decision.
+ *
+ * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
+ * @returns {Map<string, string>} old name -> new name, for logging
+ */
+function normalizeComponentKeys(spec) {
+  const schemas = spec.components?.schemas;
+  /** @type {Map<string, string>} */
+  const renames = new Map();
+  if (!schemas) return renames;
+
+  const existing = new Set(Object.keys(schemas));
+
+  for (const name of Object.keys(schemas)) {
+    if (COMPONENT_KEY_PATTERN.test(name)) continue;
+
+    const normalized = toPascalCase(name);
+    if (!COMPONENT_KEY_PATTERN.test(normalized)) {
+      throw new Error(
+        `patch-spec: component schema '${name}' does not normalize to a valid OAS component key ` +
+          `(got '${normalized}'); it needs an explicit rename.`,
+      );
+    }
+    if (existing.has(normalized)) {
+      throw new Error(
+        `patch-spec: normalizing component schema '${name}' to '${normalized}' would collide ` +
+          `with an existing component of that name.`,
+      );
+    }
+    existing.add(normalized);
+    renames.set(name, normalized);
+  }
+
+  if (renames.size === 0) return renames;
+
+  // Rebuild in the original key order so the patched spec stays a minimal, reviewable diff
+  // against the committed one (JSON.stringify preserves insertion order).
+  /** @type {Record<string, import('./lib/schema-walk.mjs').SchemaNode>} */
+  const renamedSchemas = {};
+  for (const [name, schema] of Object.entries(schemas)) {
+    renamedSchemas[renames.get(name) ?? name] = schema;
+  }
+  /** @type {{ schemas?: Record<string, import('./lib/schema-walk.mjs').SchemaNode> }} */ (
+    spec.components
+  ).schemas = renamedSchemas;
+
+  rewriteComponentRefs(spec, renames);
+
+  return renames;
+}
+
+/**
  * @param {import('./lib/schema-walk.mjs').OpenApiSpecFragment} spec
  * @returns {import('./lib/schema-walk.mjs').OpenApiSpecFragment}
  */
@@ -595,6 +732,7 @@ export function patchSpec(spec) {
   /** @type {string[]} */
   const missing = [];
 
+  normalizeComponentKeys(spec);
   patchTimestamps(spec, missing);
   const oldContextNames = patchAlertContext(spec, missing);
   patchRequestResponseSplits(spec, missing);

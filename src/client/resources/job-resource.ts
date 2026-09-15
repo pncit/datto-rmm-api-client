@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 import {
-  get1Response,
-  getJobResultsResponse,
-  getStdErrResponseItem,
-  getStdOutResponseItem,
+  Get1Response as get1Response,
+  GetJobResultsResponse as getJobResultsResponse,
+  GetStdErrResponseItem as getStdErrResponseItem,
+  GetStdOutResponseItem as getStdOutResponseItem,
 } from "../../generated/schemas/-v2-job/-v2-job.zod";
 import type { GetJobComponentsParams } from "../../generated/types/getJobComponentsParams";
 import type { Job } from "../../generated/types/job";

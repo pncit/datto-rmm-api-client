@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getAlertResponse } from "../generated/schemas/-v2-alert/-v2-alert.zod";
+import { GetAlertResponse as getAlertResponse } from "../generated/schemas/-v2-alert/-v2-alert.zod";
 
 /**
  * The reconciled `alertContext` schema (R8): a permissive, `@class`-tagged open object matching

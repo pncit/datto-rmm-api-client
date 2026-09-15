@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 import {
-  getDeviceAuditByMacAddressResponseItem,
-  getDeviceAuditResponse,
-  getEsxiHostAuditResponse,
-  getPrinterAuditResponse,
+  GetDeviceAuditByMacAddressResponseItem as getDeviceAuditByMacAddressResponseItem,
+  GetDeviceAuditResponse as getDeviceAuditResponse,
+  GetEsxiHostAuditResponse as getEsxiHostAuditResponse,
+  GetPrinterAuditResponse as getPrinterAuditResponse,
 } from "../../generated/schemas/-v2-audit/-v2-audit.zod";
 import type { DeviceAudit } from "../../generated/types/deviceAudit";
 import type { ESXiHostAudit } from "../../generated/types/eSXiHostAudit";

@@ -27,6 +27,15 @@ import { defineConfig } from "orval";
  * scripts/patch-spec.mjs from the committed spec/openapi.json (Phase 2). Overridable via
  * DATTO_OPENAPI_SPEC for local experimentation.
  *
+ * No `input.parserOptions.externalRefs` allow-list is declared, deliberately. Orval 8.22.0
+ * gated external `$ref` resolution behind an explicit allow-list (orval-labs/orval#3723,
+ * GHSA-cxq5-97v7-87j8) and refuses to fetch any `$ref` outside it. That is a no-op here: every
+ * one of the patched spec's `$ref`s is a same-document `#/components/schemas/...` pointer, so
+ * nothing is ever fetched and the empty default allow-list is exactly right. If a future spec
+ * refresh introduces a cross-document `$ref`, generation will fail loud ("Refused to fetch
+ * external URL") rather than silently resolving it — at which point the specific document, not
+ * `['*']`, belongs in the allow-list.
+ *
  * Both targets set `output.clean: true`: Orval only ever writes the files a given generation
  * pass actually produces, so if a spec refresh removes a component schema (or patch-spec.mjs's
  * own alertContext correction prunes now-dead components — see patch-spec.mjs's
