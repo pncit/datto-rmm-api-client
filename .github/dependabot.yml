@@ -11,6 +11,27 @@ updates:
     schedule:
       interval: 'weekly'
     open-pull-requests-limit: 5
+    # Cooldown holds a release back until the ecosystem has had time to
+    # catch a malicious or broken publish. Most compromised npm versions are
+    # yanked inside 24-72h, which is why the platform default is 3 days
+    # (since 2026-07-14); 7 catches the slower ones. Weekly checks make the
+    # extra wait almost free — a held release lands at the next run, so 7 and
+    # 14 are one and two intervals. Majors wait 14: the x.0.1 that fixes a
+    # bad x.0.0 nearly always lands inside two weeks. @pncit/* is excluded
+    # rather than set to 0 days (the range is 1-90, 0 cannot be written):
+    # we publish those, so there is no unknown-publisher risk, and a new
+    # in-house contract should reach its consumers the same week.
+    # Cooldown is version-updates only — the security group below is
+    # untouched and still opens the moment an advisory lands (ticketing#409,
+    # 2026-09-14: the security group jumped 3.0.20 -> 3.0.37 and picked up
+    # undici ^5.29 on the way; that needs a hand-picked version, not this).
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 7
+      exclude:
+        - '@pncit/*'
     groups:
       # The @pncit libraries arrive together in their own PR, never buried in
       # the minor/patch roll-up: a bump of an in-house contract is reviewed,
@@ -45,6 +66,15 @@ updates:
     schedule:
       interval: 'weekly'
     open-pull-requests-limit: 3
+    # default-days only — no semver-*-days for this ecosystem. 7 days, the
+    # longest we use: a compromised action runs in CI holding a token, the
+    # worst blast radius in the org, and refs move a few times a year so the
+    # wait costs nothing. pncit/* is ours, so it is excluded, as @pncit/* is
+    # for npm.
+    cooldown:
+      default-days: 7
+      exclude:
+        - 'pncit/*'
     groups:
       actions:
         patterns: ['*']
