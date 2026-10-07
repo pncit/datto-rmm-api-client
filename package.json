@@ -58,12 +58,12 @@
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
-    "@vitest/coverage-v8": "5.0.0",
+    "@vitest/coverage-v8": "5.0.2",
     "nock": "^14.0.15",
     "orval": "^8.40.0",
     "prettier": "^3.9.8",
     "typescript": "~7.0.2",
-    "vitest": "5.0.0",
+    "vitest": "5.0.2",
     "tsdown": "^0.23.0"
   },
   "overrides": {
