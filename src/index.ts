@@ -8,7 +8,10 @@
  * hierarchy, and the curated public type surface (`./public-types`). Deliberately **not** a
  * wildcard re-export of the raw generated types module — see that module's own doc for why.
  */
-export { createDattoRmmClient, DattoRmmClient } from "./client/datto-rmm-client";
+export {
+  createDattoRmmClient,
+  DattoRmmClient,
+} from "./client/datto-rmm-client";
 export type { DattoRmmClientConfig } from "./client/datto-client-config";
 export type { DattoLogger } from "./logging/logger";
 export type {

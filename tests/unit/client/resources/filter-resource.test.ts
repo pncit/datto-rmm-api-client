@@ -61,7 +61,9 @@ describe("FilterResource", () => {
 
     const result = await resource.custom();
 
-    expect(result).toEqual([{ id: 2, name: "My Filter", type: "quantum-filter" }]);
+    expect(result).toEqual([
+      { id: 2, name: "My Filter", type: "quantum-filter" },
+    ]);
     expect(scope.isDone()).toBe(true);
   });
 });

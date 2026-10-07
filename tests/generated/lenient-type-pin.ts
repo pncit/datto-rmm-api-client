@@ -28,11 +28,10 @@ import type { Lenient } from "../../src/validation/schema-leniency";
 /** Strict type equality (standard type-testing idiom: compares assignability in both directions
  * via a generic-function trick, which -- unlike a bare `extends` check -- also distinguishes
  * `any`/`unknown`/union-vs-intersection edge cases that a naive comparison would conflate). */
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (
-  <T>() => T extends B ? 1 : 2
-)
-  ? true
-  : false;
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+    ? true
+    : false;
 
 /** Fails to compile unless its argument is the literal type `true`. */
 type Expect<T extends true> = T;
@@ -61,7 +60,12 @@ type _DeviceClassNullable = Expect<
 type _DeviceAntivirusNullable = Expect<
   Equal<
     Lenient<Device>["antivirus"],
-    { antivirusProduct?: string | null; antivirusStatus?: AntivirusAntivirusStatus | null } | null | undefined
+    | {
+        antivirusProduct?: string | null;
+        antivirusStatus?: AntivirusAntivirusStatus | null;
+      }
+    | null
+    | undefined
   >
 >;
 

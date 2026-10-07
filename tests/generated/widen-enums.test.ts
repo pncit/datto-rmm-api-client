@@ -143,7 +143,10 @@ describe("widenGeneratedTypes", () => {
 describe("applyWidening", () => {
   test("totalMatchCount stays > 0 when re-applied to already-widened content (a re-run over already-widened output is a legitimate no-op, not a silent widening failure)", () => {
     const files = new Map([
-      ["deviceDeviceClass.ts", enumFile("DeviceDeviceClass", ["device", "printer"])],
+      [
+        "deviceDeviceClass.ts",
+        enumFile("DeviceDeviceClass", ["device", "printer"]),
+      ],
     ]);
     const primaryNamesByFile = new Map([
       ["deviceDeviceClass.ts", new Set(["DeviceDeviceClass"])],
@@ -151,7 +154,9 @@ describe("applyWidening", () => {
 
     const first = applyWidening(files, primaryNamesByFile, new Set());
     expect(first.totalMatchCount).toBe(1);
-    expect(first.files.get("deviceDeviceClass.ts")).toContain("| (string & {})");
+    expect(first.files.get("deviceDeviceClass.ts")).toContain(
+      "| (string & {})",
+    );
 
     // Simulate a second `main()` invocation over the already-widened file (e.g. no
     // `output.clean: true` regeneration in between): the match count must stay > 0, not drop to
@@ -191,9 +196,12 @@ describe("computeRootExclusion", () => {
     const files = new Map([
       [
         "listWidgetsParams.ts",
-        ["export type ListWidgetsParams = {", "  order?: string;", "};", ""].join(
-          "\n",
-        ),
+        [
+          "export type ListWidgetsParams = {",
+          "  order?: string;",
+          "};",
+          "",
+        ].join("\n"),
       ],
     ]);
 
@@ -210,13 +218,18 @@ describe("computeRootExclusion", () => {
     const files = new Map([
       [
         "listWidgetsParams.ts",
-        ["export type ListWidgetsParams = {", "  order?: string;", "};", ""].join(
-          "\n",
-        ),
+        [
+          "export type ListWidgetsParams = {",
+          "  order?: string;",
+          "};",
+          "",
+        ].join("\n"),
       ],
       [
         "warranty.ts",
-        ["export interface Warranty {", "  level?: string;", "}", ""].join("\n"),
+        ["export interface Warranty {", "  level?: string;", "}", ""].join(
+          "\n",
+        ),
       ],
     ]);
 
@@ -279,7 +292,10 @@ describe("computeRequestOnlyComponentNames", () => {
       },
       components: {
         schemas: {
-          [requestRef]: { type: "object", properties: {} } satisfies StrictSchemaNode,
+          [requestRef]: {
+            type: "object",
+            properties: {},
+          } satisfies StrictSchemaNode,
         },
       },
     } satisfies StrictOpenApiSpecFragment;
@@ -512,7 +528,9 @@ describe("verifyWideningHappened", () => {
           responses: {
             "200": {
               content: {
-                "application/json": { schema: { $ref: "#/components/schemas/Device" } },
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Device" },
+                },
               },
             },
           },
@@ -523,7 +541,9 @@ describe("verifyWideningHappened", () => {
       schemas: {
         Device: {
           type: "object",
-          properties: { deviceClass: { type: "string", enum: ["device", "printer"] } },
+          properties: {
+            deviceClass: { type: "string", enum: ["device", "printer"] },
+          },
         } satisfies StrictSchemaNode,
       },
     },
@@ -549,7 +569,9 @@ describe("verifyWideningHappened", () => {
             responses: {
               "200": {
                 content: {
-                  "application/json": { schema: { $ref: "#/components/schemas/Device" } },
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Device" },
+                  },
                 },
               },
             },
@@ -558,7 +580,10 @@ describe("verifyWideningHappened", () => {
       },
       components: {
         schemas: {
-          Device: { type: "object", properties: { name: { type: "string" } } } satisfies StrictSchemaNode,
+          Device: {
+            type: "object",
+            properties: { name: { type: "string" } },
+          } satisfies StrictSchemaNode,
         },
       },
     } satisfies StrictOpenApiSpecFragment;

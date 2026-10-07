@@ -511,7 +511,9 @@ describe("parseLenient", () => {
       const data = JSON.stringify({ parsed: true });
       const { logger } = createMockDebugLogger();
 
-      expect(() => parseLenient(schema, data, logger, "bare-transform-ctx")).not.toThrow();
+      expect(() =>
+        parseLenient(schema, data, logger, "bare-transform-ctx"),
+      ).not.toThrow();
 
       const result = parseLenient(schema, data, logger, "bare-transform-ctx");
       expect(result.success).toBe(true);
@@ -1069,7 +1071,10 @@ describe("parseLenient", () => {
           total: 150,
         }),
       );
-      const [, meta] = debugMock.mock.calls[0] as [string, { count: number; total: number }];
+      const [, meta] = debugMock.mock.calls[0] as [
+        string,
+        { count: number; total: number },
+      ];
       expect(meta.count).toBeLessThanOrEqual(meta.total);
     });
 

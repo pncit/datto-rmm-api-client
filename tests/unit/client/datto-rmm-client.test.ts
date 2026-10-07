@@ -1,5 +1,13 @@
 import nock from "nock";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { AccountResource } from "@/client/resources/account-resource";
 import { ActivityLogResource } from "@/client/resources/activity-log-resource";

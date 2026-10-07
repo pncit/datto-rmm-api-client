@@ -133,7 +133,10 @@ export class MultiWindowRateLimiter {
       case "read":
         return [this.readWindow];
       case "write":
-        return [this.aggregateWriteWindow, this.writeWindowFor(descriptor.opKey)];
+        return [
+          this.aggregateWriteWindow,
+          this.writeWindowFor(descriptor.opKey),
+        ];
       default: {
         const exhaustive: never = descriptor.kind;
         throw new Error(`Unhandled RateDescriptor kind: ${String(exhaustive)}`);
@@ -157,11 +160,14 @@ export class MultiWindowRateLimiter {
         for (const w of windows) w.record(now);
         return;
       }
-      this.logger?.debug("throttling request until rate-limit window has room", {
-        kind: descriptor.kind,
-        opKey: descriptor.opKey,
-        waitMs,
-      });
+      this.logger?.debug(
+        "throttling request until rate-limit window has room",
+        {
+          kind: descriptor.kind,
+          opKey: descriptor.opKey,
+          waitMs,
+        },
+      );
       await sleep(waitMs);
     }
   }

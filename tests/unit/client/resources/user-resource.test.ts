@@ -62,13 +62,11 @@ describe("UserResource", () => {
   });
 
   it("resetKeys() POSTs the bodiless /api/v2/user/resetApiKeys and tags user-reset-keys", async () => {
-    const scope = nock(BASE_URL)
-      .post("/api/v2/user/resetApiKeys")
-      .reply(200, {
-        apiAccessKey: "new-access-key",
-        apiSecretKey: "new-secret-key",
-        userName: "jdoe",
-      });
+    const scope = nock(BASE_URL).post("/api/v2/user/resetApiKeys").reply(200, {
+      apiAccessKey: "new-access-key",
+      apiSecretKey: "new-secret-key",
+      userName: "jdoe",
+    });
     const { resource, descriptors } = makeResource();
 
     const result = await resource.resetKeys();

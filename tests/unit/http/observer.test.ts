@@ -27,12 +27,13 @@ function fakeLogger(): DattoLogger {
   };
 }
 
-function fakeAxiosResponse(overrides: Partial<AxiosResponse> = {}): AxiosResponse {
+function fakeAxiosResponse(
+  overrides: Partial<AxiosResponse> = {},
+): AxiosResponse {
   return {
     status: 200,
     statusText: "OK",
     headers: {},
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     config: {} as any,
     data: undefined,
     ...overrides,
@@ -159,8 +160,7 @@ describe("invokeObserver", () => {
 
   it("swallows a returned rejected promise and logs one warn naming the callback, with no unhandled rejection", async () => {
     const logger = fakeLogger();
-    const fn = (() =>
-      Promise.reject(new Error("async boom"))) as unknown as (
+    const fn = (() => Promise.reject(new Error("async boom"))) as unknown as (
       event: TestEvent,
     ) => void;
 
@@ -335,7 +335,9 @@ describe("fireRequest", () => {
 
   it("assembles the DattoHttpRequestEvent from the capture", () => {
     const events: DattoHttpRequestEvent[] = [];
-    const observer: DattoHttpObserver = { onRequest: (event) => events.push(event) };
+    const observer: DattoHttpObserver = {
+      onRequest: (event) => events.push(event),
+    };
 
     fireRequest(undefined, observer, capture);
 
@@ -369,7 +371,9 @@ describe("fireResponse", () => {
 
   it("assembles the DattoHttpResponseEvent, normalizing AxiosHeaders and computing durationMs", () => {
     const events: DattoHttpResponseEvent[] = [];
-    const observer: DattoHttpObserver = { onResponse: (event) => events.push(event) };
+    const observer: DattoHttpObserver = {
+      onResponse: (event) => events.push(event),
+    };
     const response = fakeAxiosResponse({
       status: 200,
       headers: new AxiosHeaders({ "content-type": "application/json" }),
@@ -418,7 +422,9 @@ describe("fireError", () => {
 
   it("hands off the exact AxiosError instance to onError.error, unchanged", () => {
     const events: DattoHttpErrorEvent[] = [];
-    const observer: DattoHttpObserver = { onError: (event) => events.push(event) };
+    const observer: DattoHttpObserver = {
+      onError: (event) => events.push(event),
+    };
     const response = fakeAxiosResponse({
       status: 500,
       headers: new AxiosHeaders({ "x-request-id": "abc" }),
@@ -446,7 +452,9 @@ describe("fireError", () => {
 
   it("hands off a plain non-axios Error unchanged, with no response fields", () => {
     const events: DattoHttpErrorEvent[] = [];
-    const observer: DattoHttpObserver = { onError: (event) => events.push(event) };
+    const observer: DattoHttpObserver = {
+      onError: (event) => events.push(event),
+    };
     const err = new Error("network down");
 
     fireError(undefined, observer, capture, err);

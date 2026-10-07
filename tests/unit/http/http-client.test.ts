@@ -431,7 +431,12 @@ describe("createHttpClient", () => {
   });
 
   it("logs a debug event for each backoff retry and a warn event when a 429 wait is abandoned", async () => {
-    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
     const scope = nock(BASE_URL)
       .get("/foo")
       .times(DEFAULT_RETRY.maxAttempts)
@@ -453,10 +458,10 @@ describe("createHttpClient", () => {
 
   it("propagates an already-typed DattoApiError thrown by an upstream request interceptor unchanged", async () => {
     const instance = client();
-    const upstreamError = new DattoApiError(
-      "Datto RMM authentication failed",
-      { statusCode: 503, response: { message: "grant unavailable" } },
-    );
+    const upstreamError = new DattoApiError("Datto RMM authentication failed", {
+      statusCode: 503,
+      response: { message: "grant unavailable" },
+    });
     instance.interceptors.request.use(() => {
       throw upstreamError;
     });
@@ -473,7 +478,12 @@ describe("createHttpClient", () => {
   });
 
   it("logs a warn event when a 429 wait exceeds MAX_RETRY_AFTER_MS", async () => {
-    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
     const scope = nock(BASE_URL)
       .get("/foo")
       .reply(429, { message: "slow down" }, { "Retry-After": "86400" });
@@ -494,23 +504,33 @@ type ObserverEvent =
   | ["response", DattoHttpResponseEvent]
   | ["error", DattoHttpErrorEvent];
 
-function requestPayload(event: ObserverEvent | undefined): DattoHttpRequestEvent {
+function requestPayload(
+  event: ObserverEvent | undefined,
+): DattoHttpRequestEvent {
   if (!event || event[0] !== "request") {
-    throw new Error(`expected a "request" event, got ${event?.[0] ?? "undefined"}`);
+    throw new Error(
+      `expected a "request" event, got ${event?.[0] ?? "undefined"}`,
+    );
   }
   return event[1];
 }
 
-function responsePayload(event: ObserverEvent | undefined): DattoHttpResponseEvent {
+function responsePayload(
+  event: ObserverEvent | undefined,
+): DattoHttpResponseEvent {
   if (!event || event[0] !== "response") {
-    throw new Error(`expected a "response" event, got ${event?.[0] ?? "undefined"}`);
+    throw new Error(
+      `expected a "response" event, got ${event?.[0] ?? "undefined"}`,
+    );
   }
   return event[1];
 }
 
 function errorPayload(event: ObserverEvent | undefined): DattoHttpErrorEvent {
   if (!event || event[0] !== "error") {
-    throw new Error(`expected an "error" event, got ${event?.[0] ?? "undefined"}`);
+    throw new Error(
+      `expected an "error" event, got ${event?.[0] ?? "undefined"}`,
+    );
   }
   return event[1];
 }
@@ -807,11 +827,7 @@ describe("createHttpClient — httpObserver", () => {
     const observer: DattoHttpObserver = { onError: (e) => errorEvents.push(e) };
 
     const error = await observerClient(observer, { retry: { maxAttempts: 1 } })
-      .post(
-        "/foo",
-        { name: "widget" },
-        { rateDescriptor: { kind: "write" } },
-      )
+      .post("/foo", { name: "widget" }, { rateDescriptor: { kind: "write" } })
       .catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(DattoApiError);

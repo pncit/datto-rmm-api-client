@@ -293,9 +293,10 @@ function patchRequestResponseSplits(spec, missing) {
     }
 
     for (const path of refLocations) {
-      const node = /** @type {import('./lib/schema-walk.mjs').SchemaNode | undefined} */ (
-        getAtPath(spec, path)
-      );
+      const node =
+        /** @type {import('./lib/schema-walk.mjs').SchemaNode | undefined} */ (
+          getAtPath(spec, path)
+        );
       const expectedRef = `${COMPONENTS_SCHEMAS_PREFIX}${sharedSchema}`;
       if (!node || node.$ref !== expectedRef) {
         missing.push(`${path.join(".")} (expected $ref: ${expectedRef})`);
@@ -397,7 +398,9 @@ function pruneOrphanedContextSchemas(spec, oldContextNames, missing) {
   }
 
   const reachable = computeReachableComponentNames(spec);
-  const orphaned = [...candidates].filter((name) => !reachable.has(name)).sort();
+  const orphaned = [...candidates]
+    .filter((name) => !reachable.has(name))
+    .sort();
 
   for (const name of orphaned) {
     if (!EXPECTED_ORPHANED_COMPONENTS.includes(name)) {

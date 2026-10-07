@@ -81,7 +81,10 @@ describe("public surface (@/index)", () => {
   });
 
   it("exports the throwing error hierarchy as constructible classes (R9)", () => {
-    const validationError = new DattoValidationError(new ZodError([]), "response");
+    const validationError = new DattoValidationError(
+      new ZodError([]),
+      "response",
+    );
     expect(validationError).toBeInstanceOf(BaseError);
     expect(validationError).toBeInstanceOf(Error);
     expect(DattoApiError.prototype).toBeInstanceOf(Error);

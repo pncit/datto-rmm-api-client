@@ -46,8 +46,6 @@ const wrappedSchemaCache = new WeakMap<z.ZodType, z.ZodType>();
 // Internal: Zod v4 def accessor
 // ---------------------------------------------------------------------------
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 /**
  * The minimal shape this module relies on out of Zod v4's untyped internal `_zod.def`. Every
  * property beyond `type` still needs its own explicit cast at the call site (there are too many
@@ -632,8 +630,6 @@ function cleanAndDiagnoseResponse(
   }
 }
 
-/* eslint-enable @typescript-eslint/no-explicit-any */
-
 // ---------------------------------------------------------------------------
 // enumFieldPaths
 // ---------------------------------------------------------------------------
@@ -805,12 +801,10 @@ export function parseLenient<T>(
   logger: LenientParseLogger,
   context?: string,
 ): z.ZodSafeParseResult<Lenient<T>>;
-// eslint-disable-next-line no-redeclare -- TS overload signature, not a duplicate declaration
 export function parseLenient<T>(
   schema: z.ZodType<T>,
   data: unknown,
 ): z.ZodSafeParseResult<T>;
-// eslint-disable-next-line no-redeclare -- implementation signature for the overloads above
 export function parseLenient<T>(
   schema: z.ZodType<T>,
   data: unknown,

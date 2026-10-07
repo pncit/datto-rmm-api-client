@@ -71,9 +71,18 @@ function stubGrant(): nock.Scope {
  * structurally-different representations of the same conditional type at the declaration site vs.
  * the `filter().map()` call site and rejects them as unrelated (confirmed against `tsc` directly).
  */
-function eventsOf(events: ObservedEvent[], kind: "request"): DattoHttpRequestEvent[];
-function eventsOf(events: ObservedEvent[], kind: "response"): DattoHttpResponseEvent[];
-function eventsOf(events: ObservedEvent[], kind: "error"): DattoHttpErrorEvent[];
+function eventsOf(
+  events: ObservedEvent[],
+  kind: "request",
+): DattoHttpRequestEvent[];
+function eventsOf(
+  events: ObservedEvent[],
+  kind: "response",
+): DattoHttpResponseEvent[];
+function eventsOf(
+  events: ObservedEvent[],
+  kind: "error",
+): DattoHttpErrorEvent[];
 function eventsOf(events: ObservedEvent[], kind: ObservedEvent["kind"]) {
   return events.filter((e) => e.kind === kind).map((e) => e.event);
 }
@@ -102,7 +111,9 @@ describe("HTTP observer seam — assembled client (integration)", () => {
     await client.account.get();
 
     const requests = eventsOf(events, "request");
-    const grantRequest = requests.find((e) => e.url === `${BASE_URL}${GRANT_PATH}`);
+    const grantRequest = requests.find(
+      (e) => e.url === `${BASE_URL}${GRANT_PATH}`,
+    );
     if (!grantRequest) {
       throw new Error("expected a grant request event");
     }
@@ -138,7 +149,9 @@ describe("HTTP observer seam — assembled client (integration)", () => {
     // AuthManager.attachTo interceptor attached — proving the observer-first/attachTo-later
     // interceptor order composes correctly against the real object graph, not a unit-test mock
     // (R9's bearer-token half; design Risk table "instrumentation ordering" entry).
-    const accountRequest = requests.find((e) => e.url === `${BASE_URL}${ACCOUNT_PATH}`);
+    const accountRequest = requests.find(
+      (e) => e.url === `${BASE_URL}${ACCOUNT_PATH}`,
+    );
     expect(accountRequest).toBeDefined();
     expect(accountRequest!.headers["Authorization"]).toBe("Bearer tok-1");
   });
@@ -160,7 +173,12 @@ describe("HTTP observer seam — assembled client (integration)", () => {
       .get(DEVICES_PATH)
       .query({ page: "2" })
       .reply(200, {
-        pageDetails: { count: 1, totalCount: 2, prevPageUrl: null, nextPageUrl: null },
+        pageDetails: {
+          count: 1,
+          totalCount: 2,
+          prevPageUrl: null,
+          nextPageUrl: null,
+        },
         devices: [{ uid: "device-2" }],
       });
     const events: ObservedEvent[] = [];
@@ -185,7 +203,9 @@ describe("HTTP observer seam — assembled client (integration)", () => {
   });
 
   it("a lazy-refresh grant failure fires onError exactly once — on the grant attempt — never a second time on the shared instance (Decision 4 rule 2)", async () => {
-    nock(BASE_URL).post(GRANT_PATH).reply(401, { message: "invalid credentials" });
+    nock(BASE_URL)
+      .post(GRANT_PATH)
+      .reply(401, { message: "invalid credentials" });
     const events: ObservedEvent[] = [];
 
     const client = createDattoRmmClient(
@@ -204,7 +224,9 @@ describe("HTTP observer seam — assembled client (integration)", () => {
     expect(axios.isAxiosError(errors[0]!.error)).toBe(true);
     // No request ever reached the shared instance's dispatch point — the Bearer interceptor threw
     // before axios sent anything — so there is no second onError for the account request itself.
-    expect(errors.some((e) => e.url === `${BASE_URL}${ACCOUNT_PATH}`)).toBe(false);
+    expect(errors.some((e) => e.url === `${BASE_URL}${ACCOUNT_PATH}`)).toBe(
+      false,
+    );
   });
 
   it("a 429 (Retry-After) -> retry -> 200 resource read surfaces onError(429) then onResponse(200) (R2/R6)", async () => {

@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+package-lock.json
+src/generated
+spec
+tests/fixtures
+# Golden generated-source strings are verified by codegen tests, not formatting.
+
+.github/actions

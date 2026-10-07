@@ -5,8 +5,16 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from "axios";
 
-import { DEFAULT_RETRY, DEFAULT_TIMEOUT_MS, MAX_RETRY_AFTER_MS } from "../defaults";
-import { DattoApiError, extractRequestId, sanitizeAxiosErrorCause } from "../errors";
+import {
+  DEFAULT_RETRY,
+  DEFAULT_TIMEOUT_MS,
+  MAX_RETRY_AFTER_MS,
+} from "../defaults";
+import {
+  DattoApiError,
+  extractRequestId,
+  sanitizeAxiosErrorCause,
+} from "../errors";
 import type { DattoLogger } from "../logging/logger";
 import type {
   MultiWindowRateLimiter,
@@ -15,7 +23,12 @@ import type {
 import { isRecord } from "../util/is-record";
 import { sleep } from "../util/sleep";
 import type { DattoHttpObserver } from "./http-observer";
-import { captureRequest, fireError, fireRequest, fireResponse } from "./observer";
+import {
+  captureRequest,
+  fireError,
+  fireRequest,
+  fireResponse,
+} from "./observer";
 
 /**
  * Shared HTTP transport (Phase 5, R10–R12): builds the **single**, interceptor-bearing axios
@@ -152,7 +165,9 @@ function readHeader(
 ): unknown {
   if (!headers) return undefined;
   const target = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(
+    headers as Record<string, unknown>,
+  )) {
     if (key.toLowerCase() === target) {
       return value;
     }
