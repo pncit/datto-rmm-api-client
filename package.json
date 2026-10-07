@@ -57,7 +57,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.6.2",
     "@vitest/coverage-v8": "5.0.0",
     "nock": "^14.0.15",
     "orval": "^8.40.0",
