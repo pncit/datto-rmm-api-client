@@ -25,9 +25,17 @@ try {
       },
     ),
   );
+  // npm 11 returns an array; npm 12 keys metadata by package name.
+  const packages = Array.isArray(packed) ? packed : Object.values(packed);
+  assert.equal(
+    packages.length,
+    1,
+    "npm pack must produce exactly one SDK tarball",
+  );
+  assert.equal(typeof packages[0].filename, "string");
   execFileSync("tar", [
     "-xzf",
-    path.join(temporary, packed[0].filename),
+    path.join(temporary, packages[0].filename),
     "-C",
     temporary,
   ]);
