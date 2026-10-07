@@ -388,7 +388,12 @@ const httpObserver: DattoHttpObserver = {
   onError: (e) => audit.record("error", e),
 };
 
-const client = createDattoRmmClient({ apiUrl, apiKey, apiSecret, httpObserver });
+const client = createDattoRmmClient({
+  apiUrl,
+  apiKey,
+  apiSecret,
+  httpObserver,
+});
 ```
 
 `httpObserver` is an optional, purely-observational seam for a consumer with a compliance/audit
@@ -609,3 +614,13 @@ shape).
 ## License
 
 MIT © PNC IT
+
+## Development
+
+Use Node.js 24 LTS (at least 24.11) for the build tools. The SDK still targets Node.js 20 and later.
+Run `npm ci`, `npm run lint`, `npm run typecheck`, `npm run test:coverage`, `npm run test:repro`,
+and `npm run build` before submitting changes. `lint` checks Prettier formatting; `lint:fix` applies it.
+TypeScript 7 checks source, tests, and tooling. The build checks the actual npm tarball's ESM exports
+and compiles a strict TypeScript consumer against its packaged declarations without API calls.
+Generated files, spec data, fixtures, and vendored actions are excluded from formatting; generated
+SDK output is checked separately for reproducibility.

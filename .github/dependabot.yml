@@ -6,10 +6,10 @@
 version: 2
 
 updates:
-  - package-ecosystem: 'npm'
-    directory: '/'
+  - package-ecosystem: "npm"
+    directory: "/"
     schedule:
-      interval: 'weekly'
+      interval: "weekly"
     open-pull-requests-limit: 5
     # Cooldown holds a release back until the ecosystem has had time to
     # catch a malicious or broken publish. Most compromised npm versions are
@@ -31,7 +31,7 @@ updates:
       semver-minor-days: 7
       semver-patch-days: 7
       exclude:
-        - '@pncit/*'
+        - "@pncit/*"
     groups:
       # The @pncit libraries arrive together in their own PR, never buried in
       # the minor/patch roll-up: a bump of an in-house contract is reviewed,
@@ -39,32 +39,32 @@ updates:
       pncit:
         applies-to: version-updates
         patterns:
-          - '@pncit/*'
+          - "@pncit/*"
       # Everything else routine collapses into one PR. Majors stay as
       # individual PRs for human review.
       npm-minor-patch:
         applies-to: version-updates
         exclude-patterns:
-          - '@pncit/*'
+          - "@pncit/*"
         update-types:
-          - 'minor'
-          - 'patch'
+          - "minor"
+          - "patch"
       # Security advisories are event-driven, not weekly; batch them so a
       # cluster of advisories is one PR.
       security:
         applies-to: security-updates
         patterns:
-          - '*'
+          - "*"
 
   # Workflow action refs, including pncit/shared-actions@v2 and
   # actions/checkout. Tag refs only move on a major (a few PRs a year);
   # SHA-pinned refs get a PR per upstream release, with the `# vX.Y.Z`
   # comment kept current. Grouped so a repo gets one PR per round, not one
   # per action. Nothing else in the org watches for a shared-actions bump.
-  - package-ecosystem: 'github-actions'
-    directories: ['/', '/.github/actions/*']
+  - package-ecosystem: "github-actions"
+    directories: ["/", "/.github/actions/*"]
     schedule:
-      interval: 'weekly'
+      interval: "weekly"
     open-pull-requests-limit: 3
     # default-days only — no semver-*-days for this ecosystem. 7 days, the
     # longest we use: a compromised action runs in CI holding a token, the
@@ -74,7 +74,7 @@ updates:
     cooldown:
       default-days: 7
       exclude:
-        - 'pncit/*'
+        - "pncit/*"
     groups:
       actions:
-        patterns: ['*']
+        patterns: ["*"]

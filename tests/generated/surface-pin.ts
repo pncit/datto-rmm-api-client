@@ -71,14 +71,17 @@ import type { DattoRmmClientConfig } from "../../src/client/datto-client-config"
 import { dattoHttpObserverSchema } from "../../src/http/http-observer";
 
 /** Strict type equality (standard type-testing idiom — see `lenient-type-pin.ts`'s doc). */
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (
-  <T>() => T extends B ? 1 : 2
-)
-  ? true
-  : false;
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+    ? true
+    : false;
 
 /** Bidirectional `extends` check — assignability both ways, without requiring exact identity. */
-type MutuallyAssignable<A, B> = A extends B ? (B extends A ? true : false) : false;
+type MutuallyAssignable<A, B> = A extends B
+  ? B extends A
+    ? true
+    : false
+  : false;
 
 /** Fails to compile unless its argument is the literal type `true`. */
 type Expect<T extends true> = T;
@@ -92,13 +95,22 @@ type _HttpObserverField = NonNullable<DattoRmmClientConfig["httpObserver"]>;
 // their own concrete `DattoHttp*Event` parameter — not `never` — so the idiomatic inline literal
 // `httpObserver: { onRequest: (event) => event.method }` type-checks with no annotation.
 type _OnRequestParamPin = Expect<
-  Equal<ParamOf<NonNullable<_HttpObserverField["onRequest"]>>, DattoHttpRequestEvent>
+  Equal<
+    ParamOf<NonNullable<_HttpObserverField["onRequest"]>>,
+    DattoHttpRequestEvent
+  >
 >;
 type _OnResponseParamPin = Expect<
-  Equal<ParamOf<NonNullable<_HttpObserverField["onResponse"]>>, DattoHttpResponseEvent>
+  Equal<
+    ParamOf<NonNullable<_HttpObserverField["onResponse"]>>,
+    DattoHttpResponseEvent
+  >
 >;
 type _OnErrorParamPin = Expect<
-  Equal<ParamOf<NonNullable<_HttpObserverField["onError"]>>, DattoHttpErrorEvent>
+  Equal<
+    ParamOf<NonNullable<_HttpObserverField["onError"]>>,
+    DattoHttpErrorEvent
+  >
 >;
 
 // (b) `z.infer<typeof dattoHttpObserverSchema>` and the hand-authored `DattoHttpObserver` stay

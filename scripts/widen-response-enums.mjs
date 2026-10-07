@@ -400,7 +400,10 @@ function expandExcludedNames(roots, nameToImports) {
  *   matchedRequestOnlyNames: Set<string>,
  * }}
  */
-export function computeRootExclusion(fileContentsByName, requestOnlyComponentNames) {
+export function computeRootExclusion(
+  fileContentsByName,
+  requestOnlyComponentNames,
+) {
   const nameToImports = new Map();
   const rootExcludedNames = new Set();
   const primaryNamesByFile = new Map();
@@ -422,7 +425,12 @@ export function computeRootExclusion(fileContentsByName, requestOnlyComponentNam
     [...requestOnlyComponentNames].filter((name) => declaredNames.has(name)),
   );
 
-  return { nameToImports, rootExcludedNames, primaryNamesByFile, matchedRequestOnlyNames };
+  return {
+    nameToImports,
+    rootExcludedNames,
+    primaryNamesByFile,
+    matchedRequestOnlyNames,
+  };
 }
 
 /**
@@ -436,7 +444,11 @@ export function computeRootExclusion(fileContentsByName, requestOnlyComponentNam
  * @param {Set<string>} excludedNames
  * @returns {{ files: Map<string, string>, totalMatchCount: number }}
  */
-export function applyWidening(fileContentsByName, primaryNamesByFile, excludedNames) {
+export function applyWidening(
+  fileContentsByName,
+  primaryNamesByFile,
+  excludedNames,
+) {
   const files = new Map();
   let totalMatchCount = 0;
   for (const [fileName, content] of fileContentsByName) {
@@ -560,7 +572,10 @@ export function verifyWideningHappened(
     );
   }
 
-  if (requestOnlyComponentNames.size > 0 && matchedRequestOnlyNames.size === 0) {
+  if (
+    requestOnlyComponentNames.size > 0 &&
+    matchedRequestOnlyNames.size === 0
+  ) {
     throw new Error(
       "widen-response-enums: the patched spec has request-only component schema(s) " +
         `(${[...requestOnlyComponentNames].sort().join(", ")}), but none resolved to a declared ` +
@@ -585,8 +600,12 @@ function main() {
     ]),
   );
 
-  const { nameToImports, rootExcludedNames, primaryNamesByFile, matchedRequestOnlyNames } =
-    computeRootExclusion(fileContentsByName, requestOnlyComponentNames);
+  const {
+    nameToImports,
+    rootExcludedNames,
+    primaryNamesByFile,
+    matchedRequestOnlyNames,
+  } = computeRootExclusion(fileContentsByName, requestOnlyComponentNames);
   const excluded = expandExcludedNames(rootExcludedNames, nameToImports);
   const { files: widened, totalMatchCount } = applyWidening(
     fileContentsByName,

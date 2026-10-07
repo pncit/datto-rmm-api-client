@@ -23,13 +23,11 @@ describe("SystemResource", () => {
   });
 
   it("status() hits GET /api/v2/system/status", async () => {
-    const scope = nock(BASE_URL)
-      .get("/api/v2/system/status")
-      .reply(200, {
-        version: "9.1.0",
-        status: "OK",
-        started: "2024-01-01T00:00:00.000Z",
-      });
+    const scope = nock(BASE_URL).get("/api/v2/system/status").reply(200, {
+      version: "9.1.0",
+      status: "OK",
+      started: "2024-01-01T00:00:00.000Z",
+    });
     const { resource, descriptors } = makeResource();
 
     const result = await resource.status();

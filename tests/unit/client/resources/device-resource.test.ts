@@ -1,5 +1,13 @@
 import nock from "nock";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { DeviceResource } from "@/client/resources/device-resource";
 import { withUdfMasking } from "@/logging/mask";

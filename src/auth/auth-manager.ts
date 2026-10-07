@@ -4,7 +4,12 @@ import { z } from "zod";
 import { DEFAULT_TIMEOUT_MS, DEFAULT_TOKEN_REFRESH_PCT } from "../defaults";
 import { DattoApiError } from "../errors";
 import type { DattoHttpObserver } from "../http/http-observer";
-import { captureRequest, fireError, fireRequest, fireResponse } from "../http/observer";
+import {
+  captureRequest,
+  fireError,
+  fireRequest,
+  fireResponse,
+} from "../http/observer";
 import type { DattoLogger } from "../logging/logger";
 
 import { InMemoryTokenStore, type TokenInfo } from "./token-store";
@@ -191,7 +196,12 @@ export class AuthManager {
     // Fired on the resolved 2xx, BEFORE `safeParse` runs below — a malformed-token 2xx has
     // already fired its one terminal event here and must never also fire `onError` (Decision 4
     // rule 3).
-    fireResponse(this.config.logger, this.config.httpObserver, capture, response);
+    fireResponse(
+      this.config.logger,
+      this.config.httpObserver,
+      capture,
+      response,
+    );
 
     const parsed = tokenResponseSchema.safeParse(response.data);
     if (!parsed.success) {

@@ -224,5 +224,10 @@ export function fireError(
         }
       : {}),
   };
-  invokeObserver<DattoHttpErrorEvent>(logger, "onError", observer.onError, event);
+  invokeObserver<DattoHttpErrorEvent>(
+    logger,
+    "onError",
+    observer.onError,
+    event,
+  );
 }

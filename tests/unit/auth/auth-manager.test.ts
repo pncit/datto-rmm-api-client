@@ -296,23 +296,33 @@ type ObserverEvent =
   | ["response", DattoHttpResponseEvent]
   | ["error", DattoHttpErrorEvent];
 
-function requestPayload(event: ObserverEvent | undefined): DattoHttpRequestEvent {
+function requestPayload(
+  event: ObserverEvent | undefined,
+): DattoHttpRequestEvent {
   if (!event || event[0] !== "request") {
-    throw new Error(`expected a "request" event, got ${event?.[0] ?? "undefined"}`);
+    throw new Error(
+      `expected a "request" event, got ${event?.[0] ?? "undefined"}`,
+    );
   }
   return event[1];
 }
 
-function responsePayload(event: ObserverEvent | undefined): DattoHttpResponseEvent {
+function responsePayload(
+  event: ObserverEvent | undefined,
+): DattoHttpResponseEvent {
   if (!event || event[0] !== "response") {
-    throw new Error(`expected a "response" event, got ${event?.[0] ?? "undefined"}`);
+    throw new Error(
+      `expected a "response" event, got ${event?.[0] ?? "undefined"}`,
+    );
   }
   return event[1];
 }
 
 function errorPayload(event: ObserverEvent | undefined): DattoHttpErrorEvent {
   if (!event || event[0] !== "error") {
-    throw new Error(`expected an "error" event, got ${event?.[0] ?? "undefined"}`);
+    throw new Error(
+      `expected an "error" event, got ${event?.[0] ?? "undefined"}`,
+    );
   }
   return event[1];
 }
@@ -342,7 +352,11 @@ describe("AuthManager — httpObserver", () => {
     };
 
     const manager = new AuthManager(
-      config({ apiKey: "my-key", apiSecret: "my-secret", httpObserver: observer }),
+      config({
+        apiKey: "my-key",
+        apiSecret: "my-secret",
+        httpObserver: observer,
+      }),
     );
     await manager.getToken();
 
@@ -417,9 +431,7 @@ describe("AuthManager — httpObserver", () => {
   });
 
   it("fires exactly one terminal event (onResponse, with the raw response body) and no onError for a 2xx malformed-token grant", async () => {
-    nock(BASE_URL)
-      .post(GRANT_PATH)
-      .reply(200, { expires_in: 3600 });
+    nock(BASE_URL).post(GRANT_PATH).reply(200, { expires_in: 3600 });
     const events: ObserverEvent[] = [];
     const observer: DattoHttpObserver = {
       onRequest: (e) => events.push(["request", e]),
@@ -454,9 +466,7 @@ describe("AuthManager — httpObserver", () => {
       error: vi.fn(),
     };
 
-    const manager = new AuthManager(
-      config({ httpObserver: observer, logger }),
-    );
+    const manager = new AuthManager(config({ httpObserver: observer, logger }));
     const error = await manager.getToken().catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(DattoApiError);

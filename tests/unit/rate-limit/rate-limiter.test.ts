@@ -144,7 +144,12 @@ describe("MultiWindowRateLimiter", () => {
   });
 
   it("emits a debug log when throttling a request until its window has room", async () => {
-    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
     const limiter = new MultiWindowRateLimiter({
       readLimit: 1,
       windowSeconds: 1,

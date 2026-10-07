@@ -43,7 +43,10 @@
  */
 import type { z } from "zod";
 
-import { componentSchema, dnetSiteMappingSchema } from "../../src/client/resources/account-resource";
+import {
+  componentSchema,
+  dnetSiteMappingSchema,
+} from "../../src/client/resources/account-resource";
 import { activityLogSchema } from "../../src/client/resources/activity-log-resource";
 import { softwareSchema } from "../../src/client/resources/audit-resource";
 import { filterSchema } from "../../src/client/resources/filter-schema";
@@ -63,11 +66,10 @@ import type { Variable } from "../../src/generated/types/variable";
 
 /** Strict type equality (standard type-testing idiom — see `lenient-type-pin.ts`'s doc for why a
  * generic-function comparison is used over a bare `extends` check). */
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (
-  <T>() => T extends B ? 1 : 2
-)
-  ? true
-  : false;
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+    ? true
+    : false;
 
 /** Fails to compile unless its argument is the literal type `true`. */
 type Expect<T extends true> = T;
@@ -80,10 +82,7 @@ type _DnetSiteMappingsDto = Expect<
   Equal<DnetSiteMappingsDto, z.infer<typeof dnetSiteMappingSchema>>
 >;
 type _DeviceNetworkInterface = Expect<
-  Equal<
-    DeviceNetworkInterface,
-    z.infer<typeof deviceNetworkInterfaceSchema>
-  >
+  Equal<DeviceNetworkInterface, z.infer<typeof deviceNetworkInterfaceSchema>>
 >;
 type _JobComponent = Expect<
   Equal<JobComponent, z.infer<typeof jobComponentSchema>>
@@ -101,10 +100,7 @@ type _FilterKeys = Expect<
   Equal<keyof Filter, keyof z.infer<typeof filterSchema>>
 >;
 type _Filter = Expect<
-  Equal<
-    Omit<Filter, "type">,
-    Omit<z.infer<typeof filterSchema>, "type">
-  >
+  Equal<Omit<Filter, "type">, Omit<z.infer<typeof filterSchema>, "type">>
 >;
 type _ActivityLogKeys = Expect<
   Equal<keyof ActivityLog, keyof z.infer<typeof activityLogSchema>>

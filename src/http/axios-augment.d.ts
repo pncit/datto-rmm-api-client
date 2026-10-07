@@ -15,7 +15,7 @@ import type { ObserverCapture } from "./observer";
  * axios — an internal build detail leaking into a dependency's public surface. This file is kept
  * in the typecheck program via `tsconfig.json`'s `include: ["src"]` (ambient `.d.ts` files are
  * picked up project-wide with no explicit import needed), but deliberately **not** imported from
- * any `src/*.ts` value module reachable from `src/index.ts`'s entry graph — `tsup`'s `dts: true`
+ * any `src/*.ts` value module reachable from `src/index.ts`'s entry graph — `tsdown`'s `dts: true`
  * rollup follows that import graph, so a file nothing in it imports is never pulled in. Phase 8's
  * exit gate asserts `dist/index.d.ts` contains no `declare module 'axios'`, turning this into a
  * verified guarantee rather than a hope.

@@ -67,9 +67,7 @@ function pathPattern(specPath: string): RegExp {
   const generalized = specPath
     .split(/(\{[^}]+\})/)
     .map((segment) =>
-      /^\{[^}]+\}$/.test(segment)
-        ? "\\{[A-Za-z]+\\}"
-        : escapeRegExp(segment),
+      /^\{[^}]+\}$/.test(segment) ? "\\{[A-Za-z]+\\}" : escapeRegExp(segment),
     )
     .join("");
   return new RegExp(`/api${generalized}(?![\\w{])`);

@@ -7,7 +7,7 @@
   },
   "files": [
     "orval.config.ts",
-    "tsup.config.ts",
+    "tsdown.config.ts",
     "vitest.config.ts",
     "vitest.repro.config.ts"
   ],

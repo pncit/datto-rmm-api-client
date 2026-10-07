@@ -1,6 +1,6 @@
 {
   "name": "datto-rmm-api-client",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "ESM-only server-side TypeScript client for Datto RMM API v2",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -14,10 +14,10 @@
   "scripts": {
     "generate": "node scripts/patch-spec.mjs && orval && node scripts/dedupe-generated-index.mjs && node scripts/widen-response-enums.mjs",
     "generate:raw": "orval",
-    "build": "tsup",
-    "format": "prettier --write .",
-    "lint": "eslint src",
-    "lint:fix": "eslint src --fix",
+    "build": "tsdown && node scripts/smoke-package.mjs",
+    "format": "prettier --write src tests scripts *.json *.ts README.md .github --ignore-path .prettierignore",
+    "lint": "prettier --check src tests scripts *.json *.ts README.md .github --ignore-path .prettierignore",
+    "lint:fix": "prettier --write src tests scripts *.json *.ts README.md .github --ignore-path .prettierignore",
     "typecheck:src": "tsc --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json",
     "typecheck:tools": "tsc -p tsconfig.tools.json",
@@ -53,23 +53,18 @@
     "LICENSE"
   ],
   "dependencies": {
-    "axios": "^1.10.0",
-    "zod": "^4.0.5"
+    "axios": "^1.20.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "@types/node": "^24.13.3",
-    "@typescript-eslint/eslint-plugin": "^8.62.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "@vitest/coverage-v8": "^4.0.16",
-    "eslint": "^10.6.0",
-    "eslint-config-prettier": "^10.1.8",
+    "@vitest/coverage-v8": "5.0.0",
     "nock": "^14.0.15",
-    "orval": "^8.33.0",
-    "prettier": "^3.6.2",
-    "tsup": "^8.0.0",
-    "typescript": "^5.8.3",
-    "vitest": "^4.0.16"
+    "orval": "^8.40.0",
+    "prettier": "^3.9.8",
+    "typescript": "~7.0.2",
+    "vitest": "5.0.0",
+    "tsdown": "^0.23.0"
   },
   "overrides": {
     "js-yaml": "^4.3.2",

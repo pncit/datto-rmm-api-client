@@ -246,7 +246,8 @@ describe("patchSpec", () => {
 
     patchSpec(spec);
 
-    const oddArrayField = spec.components.schemas.Device.properties!.oddArrayField;
+    const oddArrayField =
+      spec.components.schemas.Device.properties!.oddArrayField;
     expect(oddArrayField.enum).toEqual(["device", "user"]);
     expect(oddArrayField.items!.enum).toBeUndefined();
   });
@@ -264,21 +265,30 @@ describe("patchSpec", () => {
 
   describe("missing success responses", () => {
     test("synthesizes a 200 from a schema consistently misattached to error-code responses", () => {
-      const spec = withOperation(buildValidSpecFragment(), "/v2/widget/{id}", "get", {
-        responses: {
-          "401": {
-            content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Device" } },
+      const spec = withOperation(
+        buildValidSpecFragment(),
+        "/v2/widget/{id}",
+        "get",
+        {
+          responses: {
+            "401": {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Device" },
+                },
+              },
             },
-          },
-          "403": {
-            content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Device" } },
+            "403": {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Device" },
+                },
+              },
             },
+            "500": { description: "Internal Server Error" },
           },
-          "500": { description: "Internal Server Error" },
-        },
-      } satisfies StrictOpenApiOperation);
+        } satisfies StrictOpenApiOperation,
+      );
 
       patchSpec(spec);
 
@@ -290,13 +300,20 @@ describe("patchSpec", () => {
     });
 
     test("synthesizes a 200 from a schema under '*/*' content type, not just application/json", () => {
-      const spec = withOperation(buildValidSpecFragment(), "/v2/widget/{id}", "put", {
-        responses: {
-          "400": {
-            content: { "*/*": { schema: { $ref: "#/components/schemas/Device" } } },
+      const spec = withOperation(
+        buildValidSpecFragment(),
+        "/v2/widget/{id}",
+        "put",
+        {
+          responses: {
+            "400": {
+              content: {
+                "*/*": { schema: { $ref: "#/components/schemas/Device" } },
+              },
+            },
           },
-        },
-      } satisfies StrictOpenApiOperation);
+        } satisfies StrictOpenApiOperation,
+      );
 
       patchSpec(spec);
 
@@ -327,31 +344,45 @@ describe("patchSpec", () => {
     });
 
     test("throws when an undocumented operation has no 200/204 and no inferable response schema", () => {
-      const spec = withOperation(buildValidSpecFragment(), "/v2/widget", "post", {
-        responses: {
-          "401": { description: "Request can not be authorized." },
-          "500": { description: "Internal Server Error" },
-        },
-      } satisfies StrictOpenApiOperation);
+      const spec = withOperation(
+        buildValidSpecFragment(),
+        "/v2/widget",
+        "post",
+        {
+          responses: {
+            "401": { description: "Request can not be authorized." },
+            "500": { description: "Internal Server Error" },
+          },
+        } satisfies StrictOpenApiOperation,
+      );
 
       expect(() => patchSpec(spec)).toThrow(/POST \/v2\/widget/);
     });
 
     test("throws when error-code responses carry inconsistent schemas (cannot safely synthesize)", () => {
-      const spec = withOperation(buildValidSpecFragment(), "/v2/widget/{id}", "get", {
-        responses: {
-          "401": {
-            content: {
-              "application/json": { schema: { $ref: "#/components/schemas/Device" } },
+      const spec = withOperation(
+        buildValidSpecFragment(),
+        "/v2/widget/{id}",
+        "get",
+        {
+          responses: {
+            "401": {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Device" },
+                },
+              },
+            },
+            "403": {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/AuthUser" },
+                },
+              },
             },
           },
-          "403": {
-            content: {
-              "application/json": { schema: { $ref: "#/components/schemas/AuthUser" } },
-            },
-          },
-        },
-      } satisfies StrictOpenApiOperation);
+        } satisfies StrictOpenApiOperation,
+      );
 
       expect(() => patchSpec(spec)).toThrow(/GET \/v2\/widget\/\{id\}/);
     });
@@ -409,7 +440,9 @@ describe("patchSpec", () => {
           responses: {
             "200": {
               content: {
-                "application/json": { schema: { $ref: "#/components/schemas/ActionContext" } },
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ActionContext" },
+                },
               },
             },
           },

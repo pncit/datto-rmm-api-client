@@ -12,7 +12,10 @@ export default defineConfig({
     // to a working git checkout and a live generator run as a side effect — unsuitable for the
     // default test path an installed-tarball or sandboxed environment might exercise. It has its
     // own dedicated config (vitest.repro.config.ts) and npm script (`test:repro`), run in CI.
-    exclude: [...configDefaults.exclude, "tests/generated/reproducibility.test.ts"],
+    exclude: [
+      ...configDefaults.exclude,
+      "tests/generated/reproducibility.test.ts",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "lcov"],
@@ -22,7 +25,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
 });

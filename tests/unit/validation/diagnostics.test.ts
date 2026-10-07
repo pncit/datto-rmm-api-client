@@ -89,7 +89,12 @@ describe("DiagnosticsCollector", () => {
     // for whatever reason, never visited by trackExamined -- should not surface as `total: 0` or
     // `NaN`, but fall back to the same "no known collection" default as an omitted key.
     const collector = new DiagnosticsCollector();
-    collector.record("stripped unknown response property", "extra", undefined, "never-tracked");
+    collector.record(
+      "stripped unknown response property",
+      "extra",
+      undefined,
+      "never-tracked",
+    );
 
     const sink = vi.fn();
     collector.flush(sink, "ctx");
@@ -166,7 +171,12 @@ describe("DiagnosticsCollector", () => {
   it("clears all groups and examined counts after flush", () => {
     const collector = new DiagnosticsCollector();
     collector.trackExamined("k", 5);
-    collector.record("stripped unknown response property", "extra", undefined, "k");
+    collector.record(
+      "stripped unknown response property",
+      "extra",
+      undefined,
+      "k",
+    );
 
     const sink = vi.fn();
     collector.flush(sink, "ctx");
@@ -175,7 +185,12 @@ describe("DiagnosticsCollector", () => {
     sink.mockClear();
     // Re-recording against the now-forgotten key falls back to the "no known collection" default,
     // proving `examined` was cleared alongside `groups`.
-    collector.record("stripped unknown response property", "extra", undefined, "k");
+    collector.record(
+      "stripped unknown response property",
+      "extra",
+      undefined,
+      "k",
+    );
     collector.flush(sink, "ctx");
     expect(sink).toHaveBeenCalledWith(
       "stripped unknown response property",
@@ -194,7 +209,12 @@ describe("DiagnosticsCollector", () => {
     // Mirrors how Phase 6's per-item drop path (R7, `warn`) can reuse this class unmodified.
     const collector = new DiagnosticsCollector();
     collector.trackExamined("items", 4);
-    collector.record("dropped invalid response item", "items", undefined, "items");
+    collector.record(
+      "dropped invalid response item",
+      "items",
+      undefined,
+      "items",
+    );
 
     const warn = vi.fn();
     const logger = { debug: vi.fn(), warn };
