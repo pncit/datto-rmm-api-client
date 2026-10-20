@@ -8,3 +8,7 @@ tests/fixtures
 # Golden generated-source strings are verified by codegen tests, not formatting.
 
 .github/actions
+
+# Rendered by pncit/.github rollout/render-dependabot.py and byte-compared by its
+# audit; formatting it would break the comparison.
+.github/dependabot.yml
